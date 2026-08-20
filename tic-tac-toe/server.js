@@ -7,7 +7,7 @@ const http = require('http');
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
-const { createGame, applyAction } = require('./engine');
+const { createGame, applyAction, queryLegalActions } = require('./engine');
 
 const PORT = process.env.PORT || 3000;
 const PUBLIC_DIR = path.join(__dirname, 'public');
@@ -81,8 +81,19 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
-  // POST /api/games/:id/actions -> apply an action
+  // GET /api/games/:id/actions -> list currently legal actions. The
+  // client asks this instead of inferring legality from `state` itself
+  // (see docs/architecture.md, "Client Authority: Zero").
   const actionMatch = pathname.match(/^\/api\/games\/([a-zA-Z0-9]+)\/actions$/);
+  if (actionMatch && req.method === 'GET') {
+    const id = actionMatch[1];
+    const state = games.get(id);
+    if (!state) return sendJSON(res, 404, { error: 'not-found' });
+    sendJSON(res, 200, { gameId: id, actions: queryLegalActions(state) });
+    return;
+  }
+
+  // POST /api/games/:id/actions -> apply an action
   if (actionMatch && req.method === 'POST') {
     const id = actionMatch[1];
     const state = games.get(id);
@@ -94,6 +105,29 @@ const server = http.createServer(async (req, res) => {
       sendJSON(res, result.error ? 400 : 200, {
         gameId: id,
         state: result.state,
+        error: result.error,
+      });
+    } catch (e) {
+      sendJSON(res, 400, { error: 'invalid-json' });
+    }
+    return;
+  }
+
+  // POST /api/games/:id/actions/preview -> same computation as applying
+  // an action, just not persisted. applyAction is already pure, so
+  // preview and commit are literally the same function call - only
+  // whether the result gets written to `games` differs.
+  const previewMatch = pathname.match(/^\/api\/games\/([a-zA-Z0-9]+)\/actions\/preview$/);
+  if (previewMatch && req.method === 'POST') {
+    const id = previewMatch[1];
+    const state = games.get(id);
+    if (!state) return sendJSON(res, 404, { error: 'not-found' });
+    try {
+      const action = await readJsonBody(req);
+      const result = applyAction(state, action);
+      sendJSON(res, result.error ? 400 : 200, {
+        gameId: id,
+        preview: result.state,
         error: result.error,
       });
     } catch (e) {

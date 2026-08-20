@@ -30,6 +30,22 @@ function checkWinner(board) {
   return null;
 }
 
+// Pure function: state -> Action[]. Each entry names an action type and
+// the domain of legal values for each of its parameters, so a client can
+// render enabled/disabled affordances (or a preview) without evaluating
+// legality itself - it only ever reads this list, never state.board
+// directly, to decide what's clickable.
+function queryLegalActions(state) {
+  if (state.status !== 'in-progress') {
+    return [];
+  }
+  const domain = state.board.reduce((cells, cell, index) => {
+    if (cell === null) cells.push(index);
+    return cells;
+  }, []);
+  return [{ type: 'placePiece', params: { cell: { domain } } }];
+}
+
 // Pure function: (state, action) -> { state, error }
 // Never mutates the input state.
 function applyAction(state, action) {
@@ -64,4 +80,4 @@ function applyAction(state, action) {
   return { state: nextState, error: null };
 }
 
-module.exports = { createGame, applyAction };
+module.exports = { createGame, applyAction, queryLegalActions };

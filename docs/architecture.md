@@ -111,14 +111,26 @@ Concretely:
   tricks are explicitly **out of scope** for this design. Don't design
   for them, and don't add them speculatively.
 
-This makes `tic-tac-toe/`'s current `public/client.js` a known deviation,
-not a template. It disables cells by reading `state.board` and
-`state.status` directly in `render()` — consistent with the Section 0
-status note that `tic-tac-toe/` is a deliberately simplified first pass,
-but not a pattern to carry forward into Patchwork or Forbidden Island.
-When `tic-tac-toe/` is migrated toward this architecture (Section 0),
-replacing that local check with a server-driven legal-actions query is
-part of the migration, not an optional cleanup.
+`tic-tac-toe/` now carries a first-pass version of this, ahead of the
+rest of the full architecture landing: `GET /api/games/:id/actions`
+returns `queryLegalActions(state)` as action-shape descriptors (e.g.
+`{ type: 'placePiece', params: { cell: { domain: [0, 2, 5, ...] } } }`),
+`public/client.js` drives every cell's enabled/disabled state from that
+response instead of reading `state.board`/`state.status` locally, and
+`POST /api/games/:id/actions/preview` computes an action's result
+without persisting it — reusing `applyAction` itself, since it was
+already a pure `(state, action) -> { state, error }` function with no
+side effect other than what the caller does with the result. This is
+consistent with "Preview and commit sharing one execution path"
+(Sections 7–11) despite predating the full command/event pipeline;
+`tic-tac-toe/` doesn't need phases or a command/event log to honor
+client-authority-zero, because the same pure-function discipline that
+was already required of it (Section 0, CLAUDE.md) is what makes preview
+and commit trivially the same computation. Patchwork and Forbidden
+Island are expected to expose `queryLegalActions` and a preview
+endpoint the same way, just with per-player-addressed action lists and
+richer parameter domains (a placement position × rotation × flip space
+rather than a flat cell index).
 
 ---
 

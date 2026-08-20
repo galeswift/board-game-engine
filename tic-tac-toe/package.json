@@ -5,7 +5,8 @@
   "description": "First-pass prototype for the board game rules engine.",
   "main": "server.js",
   "scripts": {
-    "start": "node server.js"
+    "start": "node server.js",
+    "test": "node --test"
   },
   "engines": {
     "node": ">=18"
