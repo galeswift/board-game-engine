@@ -2,7 +2,7 @@
 
 *Player state as a first-class object, phases as a core structure,
 Patchwork / Forbidden Island as proof-of-concept games, and ECS dropped
-entirely. Last updated August 19, 2026.*
+entirely. Last updated August 20, 2026.*
 
 > **Status note:** `tic-tac-toe/` in this repo is a deliberately simplified
 > **first-pass implementation**, not a build of the full architecture
@@ -70,7 +70,7 @@ on core; core depends on nothing game-specific, ever.
 
 ---
 
-# 2. MVC-Style Layering (Unchanged)
+# 2. MVC-Style Layering (Unchanged Split; Client Authority Now Explicit)
 
 ```
 Model                          Controller                      View
@@ -80,6 +80,45 @@ Deterministic, headless        translates requests into          Renders state s
 JSON-in / JSON-out              transactions, returns              Sends action requests
                                  state + events + effects           Contains no game logic
 ```
+
+### Client Authority: Zero
+
+"Contains no game logic" (above) is not just about rule execution — it
+also covers **legality**. The client is a dumb terminal: it renders
+whatever state (or legal-action list) the server hands it and forwards
+user intent as action requests. It never independently determines
+whether a move is legal — not even for UI affordances like disabling a
+button or greying out a cell — by reading `state` and reasoning about it
+locally. If the client needs to know what's currently allowed, it asks
+the server.
+
+Concretely:
+
+- Core exposes legality as a query, not just a gate: `queryLegalActions(state,
+  playerId) -> Action[]`, built on the same shared predicates
+  `execute` already uses (Section 6's "shared gate... reused by both
+  `execute` and `queryLegalActions`" is this same mechanism — what's new
+  here is that calling it is *mandatory* for the client, not an optional
+  convenience).
+- Any UI affordance that depends on legality (can this cell be clicked,
+  is this button enabled, whose turn indicator to show) is driven
+  entirely by the response to a `queryLegalActions` call (or the
+  `state`/`error` a `execute` request already returned), never by the
+  client re-deriving it from a locally-held copy of `state`.
+- This is a deliberate trade against responsiveness — every affordance
+  decision costs a round trip to the server. That trade is accepted on
+  purpose: optimistic UI, client-side prediction, and latency-hiding
+  tricks are explicitly **out of scope** for this design. Don't design
+  for them, and don't add them speculatively.
+
+This makes `tic-tac-toe/`'s current `public/client.js` a known deviation,
+not a template. It disables cells by reading `state.board` and
+`state.status` directly in `render()` — consistent with the Section 0
+status note that `tic-tac-toe/` is a deliberately simplified first pass,
+but not a pattern to carry forward into Patchwork or Forbidden Island.
+When `tic-tac-toe/` is migrated toward this architecture (Section 0),
+replacing that local check with a server-driven legal-actions query is
+part of the migration, not an optional cleanup.
 
 ---
 
