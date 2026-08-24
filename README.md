@@ -5,7 +5,9 @@ Prototypes for a board game rules engine, one folder per game:
 - **`tic-tac-toe/`** — first pass, deployable now. A deliberately simple
   Node.js server (no dependencies) with an in-memory game store and a
   mobile-friendly web UI.
-- **`patchwork/`** — not yet implemented.
+- **`patchwork/`** — scaffold only, deployable now: a structural clone of
+  `tic-tac-toe/` (same server/engine split, same rules) standing in until
+  real Patchwork rules are built.
 - **`forbidden-island/`** — not yet implemented.
 
 Each folder is self-contained and deployable independently. This first
@@ -48,10 +50,10 @@ this particular service should build:
 4. Railway will assign a public URL automatically. Auto-deploy on push
    to `main` is on by default once a repo is connected this way.
 
-When `patchwork/` or `forbidden-island/` are ready, repeat step 2–3 as a
-**second Railway service** in the same project, pointing its Root
-Directory at that folder — each prototype gets its own URL and deploy
-lifecycle, independent of the others.
+To deploy `patchwork/` (or `forbidden-island/` once it exists), repeat
+step 2–3 as a **second Railway service** in the same project, pointing
+its Root Directory at that folder — each prototype gets its own URL and
+deploy lifecycle, independent of the others.
 
 ## Pushing this repo to GitHub for the first time
 

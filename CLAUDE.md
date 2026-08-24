@@ -16,9 +16,13 @@ it unless explicitly told otherwise.
   command/event pipeline, no phases yet. This is intentional (see the
   status note at the top of `docs/architecture.md`), not an oversight —
   don't "fix" it into the full architecture without being asked.
-- **`patchwork/`** — not started. Second proof-of-concept per the
-  architecture plan (Section 12): tests asymmetric, time-track-driven
-  turn order and per-player economy.
+- **`patchwork/`** — scaffold only: currently a structural clone of
+  `tic-tac-toe/` (same server.js/engine.js split, same game rules),
+  deployable but not yet real Patchwork. Real rules per the architecture
+  plan (Section 12) — asymmetric, time-track-driven turn order and
+  per-player economy — haven't been built yet. Don't treat
+  `patchwork/engine.js` as a starting point for those rules; it's
+  bootstrap-only and expected to be replaced wholesale.
 - **`forbidden-island/`** — not started. Third proof-of-concept: tests
   asymmetric player roles, always-legal interrupt actions, and
   cooperative win/loss conditions.

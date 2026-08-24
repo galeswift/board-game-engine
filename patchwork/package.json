@@ -1,0 +1,14 @@
+{
+  "name": "patchwork",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Placeholder for the second board-game-engine prototype (currently tic-tac-toe's rules, cloned).",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "test": "node --test"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
