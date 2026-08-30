@@ -42,6 +42,26 @@ function render() {
   }
 }
 
+// Live push: lets the *other* player's browser find out a move happened
+// without polling. This is additive on top of the REST calls above,
+// which remain the source of truth - a lost/never-connected socket just
+// means you don't see updates live, not that anything is broken.
+let socket = null;
+
+function connectSocket() {
+  if (socket) socket.close();
+  const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+  socket = new WebSocket(`${protocol}//${window.location.host}/api/games/${gameId}/socket`);
+  socket.addEventListener('message', async (event) => {
+    const message = JSON.parse(event.data);
+    if (message.type === 'state') {
+      state = message.state;
+      await refreshLegalActions();
+      render();
+    }
+  });
+}
+
 async function placePiece(cell) {
   const res = await fetch(`/api/games/${gameId}/actions`, {
     method: 'POST',
@@ -66,6 +86,7 @@ async function createGame() {
   window.history.replaceState({}, '', url);
   await refreshLegalActions();
   render();
+  connectSocket();
 }
 
 async function loadGame(id) {
@@ -79,6 +100,7 @@ async function loadGame(id) {
   state = data.state;
   await refreshLegalActions();
   render();
+  connectSocket();
 }
 
 newGameBtn.addEventListener('click', createGame);
