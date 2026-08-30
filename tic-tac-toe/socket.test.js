@@ -40,9 +40,45 @@ function waitForMessage(ws, timeoutMs = 5000) {
   });
 }
 
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 async function createGame() {
   const res = await fetch(`${BASE}/api/games`, { method: 'POST' });
   return res.json();
+}
+
+async function createMultiplayerGame() {
+  const res = await fetch(`${BASE}/api/games`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ mode: 'multiplayer' }),
+  });
+  return res.json();
+}
+
+async function join(gameId) {
+  const res = await fetch(`${BASE}/api/games/${gameId}/join`, { method: 'POST' });
+  return res.json();
+}
+
+async function placePiece(gameId, playerId, cell = 0) {
+  const action = { type: 'placePiece', cell };
+  if (playerId) action.playerId = playerId;
+  return fetch(`${BASE}/api/games/${gameId}/actions`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(action),
+  });
+}
+
+async function connectAndAuthenticate(gameId, playerId) {
+  const socket = new WebSocket(`${WS_BASE}/api/games/${gameId}/socket`);
+  await waitForOpen(socket);
+  socket.send(JSON.stringify({ type: 'authenticate', playerId }));
+  await sleep(100); // no ack protocol - give the server a beat to bind it
+  return socket;
 }
 
 test('WebSocket live channel', async (t) => {
@@ -103,6 +139,42 @@ test('WebSocket live channel', async (t) => {
         socket.once('error', resolve);
         socket.once('close', resolve);
       });
+    });
+
+    await t.test('authenticating scopes each socket\'s state push to its own slot', async () => {
+      const { gameId } = await createMultiplayerGame();
+      const x = await join(gameId);
+      const o = await join(gameId); // game is now in-progress, X's turn
+
+      const socketX = await connectAndAuthenticate(gameId, x.playerId);
+      const socketO = await connectAndAuthenticate(gameId, o.playerId);
+
+      const [messageX, messageO] = await Promise.all([
+        waitForMessage(socketX),
+        waitForMessage(socketO),
+        placePiece(gameId, x.playerId),
+      ]);
+
+      assert.deepEqual(messageX.actions, [], "not X's turn anymore");
+      assert.equal(messageO.actions[0]?.params.cell.domain.length, 8, "it's now O's turn");
+
+      socketX.close();
+      socketO.close();
+    });
+
+    await t.test('closing a bound socket broadcasts a presence update to others', async () => {
+      const { gameId } = await createMultiplayerGame();
+      const x = await join(gameId);
+      const o = await join(gameId);
+
+      const socketX = await connectAndAuthenticate(gameId, x.playerId);
+      const socketO = await connectAndAuthenticate(gameId, o.playerId);
+
+      const presence = waitForMessage(socketO);
+      socketX.close();
+
+      assert.deepEqual(await presence, { type: 'presence', slot: 'X', connected: false });
+      socketO.close();
     });
   } finally {
     child.kill();

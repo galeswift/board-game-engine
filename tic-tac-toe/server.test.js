@@ -26,11 +26,27 @@ async function createGame() {
   return res.json();
 }
 
-async function placePiece(gameId, cell) {
+async function createMultiplayerGame() {
+  const res = await fetch(`${BASE}/api/games`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ mode: 'multiplayer' }),
+  });
+  return res.json();
+}
+
+async function join(gameId) {
+  const res = await fetch(`${BASE}/api/games/${gameId}/join`, { method: 'POST' });
+  return res.json();
+}
+
+async function placePiece(gameId, cell, playerId) {
+  const action = { type: 'placePiece', cell };
+  if (playerId) action.playerId = playerId;
   return fetch(`${BASE}/api/games/${gameId}/actions`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ type: 'placePiece', cell }),
+    body: JSON.stringify(action),
   });
 }
 
@@ -116,6 +132,94 @@ test('legal actions and preview endpoints', async (t) => {
         body: JSON.stringify({ type: 'placePiece', cell: 0 }),
       });
       assert.equal(res.status, 404);
+    });
+
+    await t.test('creating a multiplayer game starts in the lobby', async () => {
+      const { mode, state } = await createMultiplayerGame();
+      assert.equal(mode, 'multiplayer');
+      assert.equal(state.status, 'lobby');
+    });
+
+    await t.test('joining claims slots in order and auto-starts once full', async () => {
+      const { gameId } = await createMultiplayerGame();
+
+      const first = await join(gameId);
+      assert.equal(first.slot, 'X');
+      assert.ok(first.playerId);
+      assert.equal(first.state.status, 'lobby', 'still waiting on the second slot');
+
+      const second = await join(gameId);
+      assert.equal(second.slot, 'O');
+      assert.ok(second.playerId);
+      assert.notEqual(second.playerId, first.playerId);
+      assert.equal(second.state.status, 'in-progress', 'auto-starts once both slots are filled');
+    });
+
+    await t.test('joining a full lobby is rejected', async () => {
+      const { gameId } = await createMultiplayerGame();
+      await join(gameId);
+      await join(gameId);
+      const res = await fetch(`${BASE}/api/games/${gameId}/join`, { method: 'POST' });
+      assert.equal(res.status, 400);
+      assert.deepEqual(await res.json(), { error: 'lobby-full' });
+    });
+
+    await t.test('joining a local game is rejected', async () => {
+      const { gameId } = await createGame();
+      const res = await fetch(`${BASE}/api/games/${gameId}/join`, { method: 'POST' });
+      assert.equal(res.status, 400);
+      assert.deepEqual(await res.json(), { error: 'not-multiplayer' });
+    });
+
+    await t.test('actions before the lobby is full are rejected', async () => {
+      const { gameId } = await createMultiplayerGame();
+      const { playerId } = await join(gameId);
+      const res = await placePiece(gameId, 0, playerId);
+      assert.equal(res.status, 400);
+      assert.equal((await res.json()).error, 'lobby-not-started');
+    });
+
+    await t.test('actions require a valid playerId once the game has started', async () => {
+      const { gameId } = await createMultiplayerGame();
+      await join(gameId);
+      await join(gameId);
+
+      const missing = await placePiece(gameId, 0);
+      assert.equal(missing.status, 400);
+      assert.equal((await missing.json()).error, 'invalid-player');
+
+      const bogus = await placePiece(gameId, 0, 'not-a-real-player-id');
+      assert.equal(bogus.status, 400);
+      assert.equal((await bogus.json()).error, 'invalid-player');
+    });
+
+    await t.test('actions enforce whose turn it is', async () => {
+      const { gameId } = await createMultiplayerGame();
+      const x = await join(gameId); // slot X, moves first
+      const o = await join(gameId); // slot O
+
+      const outOfTurn = await placePiece(gameId, 0, o.playerId);
+      assert.equal(outOfTurn.status, 400);
+      assert.equal((await outOfTurn.json()).error, 'not-your-turn');
+
+      const onTurn = await placePiece(gameId, 0, x.playerId);
+      assert.equal(onTurn.status, 200);
+      assert.equal((await onTurn.json()).state.board[0], 'X');
+    });
+
+    await t.test('GET /actions is scoped to the requesting playerId', async () => {
+      const { gameId } = await createMultiplayerGame();
+      const x = await join(gameId);
+      const o = await join(gameId); // game is now in-progress, X's turn
+
+      const xView = await fetch(`${BASE}/api/games/${gameId}/actions?playerId=${x.playerId}`);
+      assert.equal((await xView.json()).actions.length, 1, "the player whose turn it is sees the real domain");
+
+      const oView = await fetch(`${BASE}/api/games/${gameId}/actions?playerId=${o.playerId}`);
+      assert.deepEqual((await oView.json()).actions, [], "not this player's turn");
+
+      const noPlayerView = await fetch(`${BASE}/api/games/${gameId}/actions`);
+      assert.deepEqual((await noPlayerView.json()).actions, [], 'no playerId at all is treated like a spectator');
     });
   } finally {
     child.kill();
