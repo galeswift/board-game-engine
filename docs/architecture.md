@@ -132,6 +132,24 @@ endpoint the same way, just with per-player-addressed action lists and
 richer parameter domains (a placement position × rotation × flip space
 rather than a flat cell index).
 
+`queryLegalActions(state, playerId)` is now for real, not just named as
+the target: `tic-tac-toe/`'s async-multiplayer work made `GET
+/api/games/:id/actions` player-scoped — a caller only sees the real
+domain when their `playerId` maps to the slot whose turn it is,
+otherwise `[]`, the same rule the WebSocket state-push channel applies
+per socket. `playerId` identity is deliberately **not** accounts or
+sessions: each player slot gets a durable invite token at game creation
+(`POST /api/games`'s `invites`), and presenting that token to `POST
+/join` is idempotent — first use claims the slot and issues a
+`playerId`, every later use (a genuine reconnect, or just reloading the
+page) returns that same `playerId` again. The token is the only
+credential; losing it means losing the seat, by design (no localStorage,
+no accounts) — the client's job is to make that link trivially
+bookmarkable once a player is seated, not to work around needing it.
+This is the pattern named above as the lobby phase's companion: Patchwork
+and Forbidden Island should reuse it rather than invent per-game
+join/reconnect logic.
+
 ---
 
 # 3. Deterministic Execution Context (Unchanged from v2, ID Generation Simplified)
@@ -301,6 +319,24 @@ phases: {
 This keeps phase-handling code paths exercised even by the simplest game,
 rather than being an untested branch that only activates once a
 phase-heavy game shows up.
+
+### Every game's phase list leads with a lobby
+
+`tic-tac-toe/`'s async-multiplayer work (see the "Client Authority: Zero"
+section below for the identity model that goes with it) added a `lobby`
+status ahead of the simplified `play` state shown above — a game can't
+be acted on until every seat is filled, only then does it move to the
+"real" first phase. That's not tic-tac-toe-specific: any multiplayer
+game needs somewhere for "waiting for players to join" to live before
+`setup`/`play` starts, so the target phase model should treat a
+lobby-equivalent leading phase as standard, the same way every game
+declares at least one phase at all (above). tic-tac-toe's version is a
+plain `status` value rather than a full phase declaration (Section 0:
+it has no phase machinery at all yet), but Patchwork and Forbidden
+Island — both genuinely multiplayer from the start — are candidates to
+formalize this as an actual `lobby` phase once they're built, along
+with the same invite-link-per-slot identity pattern tic-tac-toe uses
+(below) rather than reinventing join/reconnect per game.
 
 ### Phase-gated action legality
 

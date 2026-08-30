@@ -18,6 +18,19 @@
     </div>
     <p class="hint">Local: pass-and-play on one device. Multiplayer: share
       the link so a second player can join from any device.</p>
+
+    <div id="invitePanel" class="invite-panel" hidden>
+      <p><strong>Share this link with your opponent</strong> — it's the
+        only way for them to join this game.</p>
+      <input id="inviteLinkInput" type="text" readonly />
+      <button id="copyInviteBtn">Copy Invite Link</button>
+    </div>
+
+    <p id="reconnectNotice" class="hint" hidden>
+      <strong>Do not lose this link</strong> — it's the only way back
+      into this game. Bookmark this page now; you can come back to it
+      any time.
+    </p>
   </main>
   <script src="/client.js"></script>
 </body>

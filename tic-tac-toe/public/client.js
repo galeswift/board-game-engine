@@ -3,15 +3,27 @@ const statusEl = document.getElementById('status');
 const newLocalGameBtn = document.getElementById('newLocalGameBtn');
 const newMultiplayerGameBtn = document.getElementById('newMultiplayerGameBtn');
 const shareBtn = document.getElementById('shareBtn');
+const invitePanelEl = document.getElementById('invitePanel');
+const inviteLinkInputEl = document.getElementById('inviteLinkInput');
+const copyInviteBtn = document.getElementById('copyInviteBtn');
+const reconnectNoticeEl = document.getElementById('reconnectNotice');
 
 let gameId = null;
 let mode = 'local';
-let playerId = null; // multiplayer only; kept in memory only for now -
-                      // no localStorage, no way to recover it on refresh
-                      // yet. That's what the invite-link work replacing
-                      // this open /join step is for.
+// The invite link is the only credential for multiplayer identity - no
+// localStorage, no accounts. Losing it (and never bookmarking the page,
+// see reconnectNoticeEl below) means losing your seat for good; that's
+// a deliberate, documented tradeoff, not an oversight.
+let playerId = null;
 let state = null;
 let legalActions = [];
+
+function inviteLink(id, token) {
+  const link = new URL(`${window.location.origin}${window.location.pathname}`);
+  link.searchParams.set('game', id);
+  link.searchParams.set('invite', token);
+  return link.toString();
+}
 
 // The client never infers legality from `state` itself - it only ever
 // acts on what queryLegalActions (GET /api/games/:id/actions) reports.
@@ -49,6 +61,14 @@ function render() {
   } else {
     statusEl.textContent = `${state.currentPlayer}'s turn`;
   }
+
+  // The invite panel is only useful while still waiting for the
+  // opponent - once they've joined, sharing it again would just hand
+  // out someone else's seat.
+  if (state.status !== 'lobby') {
+    invitePanelEl.hidden = true;
+  }
+  reconnectNoticeEl.hidden = !(mode === 'multiplayer' && playerId);
 }
 
 // Live push: lets the *other* player's browser find out a move happened
@@ -94,11 +114,17 @@ async function placePiece(cell) {
   }
 }
 
-// Open join, no invite token yet - claims whatever slot is still free.
-// Replaced by an invite-token-gated version next; until then, this is
-// also the only way a second browser gets into a multiplayer game.
-async function joinLobby() {
-  const res = await fetch(`/api/games/${gameId}/join`, { method: 'POST' });
+// Claims (or reconnects to) whichever slot `inviteToken` belongs to.
+// Idempotent server-side: calling this again with the same token - a
+// fresh join or a reconnect after closing the tab - returns the same
+// playerId both times. No token, no slot: a bare ?game=<id> link can
+// view but never join.
+async function joinLobby(inviteToken) {
+  const res = await fetch(`/api/games/${gameId}/join`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ inviteToken }),
+  });
   const data = await res.json();
   if (data.playerId) {
     playerId = data.playerId;
@@ -116,18 +142,28 @@ async function createGame(requestedMode) {
   gameId = data.gameId;
   mode = data.mode || 'local';
   state = data.state;
+
   const url = new URL(window.location);
   url.searchParams.set('game', gameId);
-  window.history.replaceState({}, '', url);
+
   if (mode === 'multiplayer') {
-    await joinLobby(); // creator claims the first slot automatically
+    const ownInvite = data.invites.find((i) => i.slot === 'X');
+    const opponentInvite = data.invites.find((i) => i.slot === 'O');
+    await joinLobby(ownInvite.token); // creator claims the first slot automatically
+    // The creator's own address bar becomes their personal reconnect
+    // link - bookmarking it later needs no extra step.
+    url.searchParams.set('invite', ownInvite.token);
+    inviteLinkInputEl.value = inviteLink(gameId, opponentInvite.token);
+    invitePanelEl.hidden = false;
   }
+
+  window.history.replaceState({}, '', url);
   await refreshLegalActions();
   render();
   connectSocket();
 }
 
-async function loadGame(id) {
+async function loadGame(id, joinToken) {
   const res = await fetch(`/api/games/${id}`);
   if (!res.ok) {
     await createGame('local');
@@ -137,8 +173,8 @@ async function loadGame(id) {
   gameId = data.gameId;
   mode = data.mode || 'local';
   state = data.state;
-  if (mode === 'multiplayer' && !playerId) {
-    await joinLobby(); // a fresh visitor to a shared multiplayer link
+  if (mode === 'multiplayer' && joinToken) {
+    await joinLobby(joinToken); // first visit or a reconnect - same call either way
   }
   await refreshLegalActions();
   render();
@@ -152,11 +188,16 @@ shareBtn.addEventListener('click', async () => {
   shareBtn.textContent = 'Copied!';
   setTimeout(() => { shareBtn.textContent = 'Copy Share Link'; }, 1500);
 });
+copyInviteBtn.addEventListener('click', async () => {
+  await navigator.clipboard.writeText(inviteLinkInputEl.value);
+  copyInviteBtn.textContent = 'Copied!';
+  setTimeout(() => { copyInviteBtn.textContent = 'Copy Invite Link'; }, 1500);
+});
 
 const params = new URLSearchParams(window.location.search);
 const existingId = params.get('game');
 if (existingId) {
-  loadGame(existingId);
+  loadGame(existingId, params.get('invite'));
 } else {
   createGame('local');
 }

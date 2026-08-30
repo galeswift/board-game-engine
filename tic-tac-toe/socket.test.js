@@ -58,9 +58,17 @@ async function createMultiplayerGame() {
   return res.json();
 }
 
-async function join(gameId) {
-  const res = await fetch(`${BASE}/api/games/${gameId}/join`, { method: 'POST' });
+async function join(gameId, inviteToken) {
+  const res = await fetch(`${BASE}/api/games/${gameId}/join`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ inviteToken }),
+  });
   return res.json();
+}
+
+function tokenFor(invites, slot) {
+  return invites.find((i) => i.slot === slot).token;
 }
 
 async function placePiece(gameId, playerId, cell = 0) {
@@ -142,9 +150,9 @@ test('WebSocket live channel', async (t) => {
     });
 
     await t.test('authenticating scopes each socket\'s state push to its own slot', async () => {
-      const { gameId } = await createMultiplayerGame();
-      const x = await join(gameId);
-      const o = await join(gameId); // game is now in-progress, X's turn
+      const { gameId, invites } = await createMultiplayerGame();
+      const x = await join(gameId, tokenFor(invites, 'X'));
+      const o = await join(gameId, tokenFor(invites, 'O')); // now in-progress, X's turn
 
       const socketX = await connectAndAuthenticate(gameId, x.playerId);
       const socketO = await connectAndAuthenticate(gameId, o.playerId);
@@ -163,9 +171,9 @@ test('WebSocket live channel', async (t) => {
     });
 
     await t.test('closing a bound socket broadcasts a presence update to others', async () => {
-      const { gameId } = await createMultiplayerGame();
-      const x = await join(gameId);
-      const o = await join(gameId);
+      const { gameId, invites } = await createMultiplayerGame();
+      const x = await join(gameId, tokenFor(invites, 'X'));
+      const o = await join(gameId, tokenFor(invites, 'O'));
 
       const socketX = await connectAndAuthenticate(gameId, x.playerId);
       const socketO = await connectAndAuthenticate(gameId, o.playerId);

@@ -20,10 +20,13 @@ const SLOTS = ['X', 'O'];
 // sockets) are lost on redeploy/restart. Each entry is:
 //   { state, mode, lobby, sockets }
 // `state` is the pure engine state. `mode` is 'local' | 'multiplayer'.
-// `lobby` (multiplayer only) is { X: { playerId }, O: { playerId } } -
+// `lobby` (multiplayer only) is { X: { playerId, token }, O: { playerId, token } } -
 // this is server-owned identity bookkeeping, not engine state; engine.js
-// stays identity-free. `sockets` is a runtime-only Set of live
-// WebSocket connections - never persisted, never part of engine state.
+// stays identity-free. A slot's `token` is generated once at creation
+// and is the only way to claim (or reconnect to) that slot - see
+// slotForToken and the /join handler below. `sockets` is a runtime-only
+// Set of live WebSocket connections - never persisted, never part of
+// engine state.
 const games = new Map();
 
 // A slot's playerId, or null if the game is local / the id matches
@@ -33,6 +36,15 @@ const games = new Map();
 function slotForPlayerId(lobby, playerId) {
   if (!lobby || !playerId) return null;
   return SLOTS.find((slot) => lobby[slot].playerId === playerId) || null;
+}
+
+// A slot's invite token, or null. Each slot's token is generated once at
+// game creation and never changes - it's the durable credential a player
+// holds, not a one-time code, which is what makes /join idempotent (see
+// the join handler below).
+function slotForToken(lobby, token) {
+  if (!lobby || !token) return null;
+  return SLOTS.find((slot) => lobby[slot].token === token) || null;
 }
 
 // The legal-actions list a specific caller is allowed to see. Local
@@ -134,29 +146,48 @@ const server = http.createServer(async (req, res) => {
     const id = crypto.randomBytes(4).toString('hex');
     const state = createGame({ mode });
     const lobby = mode === 'multiplayer'
-      ? { X: { playerId: null }, O: { playerId: null } }
+      ? {
+        X: { playerId: null, token: crypto.randomBytes(12).toString('hex') },
+        O: { playerId: null, token: crypto.randomBytes(12).toString('hex') },
+      }
       : null;
     games.set(id, { state, mode, lobby, sockets: new Set() });
     if (mode === 'multiplayer') {
-      sendJSON(res, 201, { gameId: id, mode, state });
+      // Invite tokens are returned only here, at creation - never echoed
+      // back by any other endpoint (GET /:id's lobby summary is
+      // claimed/open only, see below).
+      const invites = SLOTS.map((slot) => ({ slot, token: lobby[slot].token }));
+      sendJSON(res, 201, { gameId: id, mode, state, invites });
     } else {
       sendJSON(res, 201, { gameId: id, state }); // unchanged shape for local
     }
     return;
   }
 
-  // GET /api/games/:id -> fetch current state
+  // GET /api/games/:id -> fetch current state. For multiplayer games,
+  // includes a redacted lobby summary (claimed/open per slot) so a UI
+  // can show "waiting for player O" - never the tokens themselves.
   const gameMatch = pathname.match(/^\/api\/games\/([a-zA-Z0-9]+)$/);
   if (gameMatch && req.method === 'GET') {
     const record = games.get(gameMatch[1]);
     if (!record) return sendJSON(res, 404, { error: 'not-found' });
-    sendJSON(res, 200, { gameId: gameMatch[1], mode: record.mode, state: record.state });
+    const response = { gameId: gameMatch[1], mode: record.mode, state: record.state };
+    if (record.mode === 'multiplayer') {
+      response.lobby = {
+        X: { claimed: record.lobby.X.playerId !== null },
+        O: { claimed: record.lobby.O.playerId !== null },
+      };
+    }
+    sendJSON(res, 200, response);
     return;
   }
 
-  // POST /api/games/:id/join -> claim an open lobby slot. No invite
-  // token yet (that's the next increment) - any caller can claim any
-  // open slot. Auto-starts the game once both slots are filled.
+  // POST /api/games/:id/join -> claim (or reconnect to) the lobby slot
+  // a { inviteToken } belongs to. Idempotent: the first use of a slot's
+  // token claims it and issues a playerId; every later use of that same
+  // token returns that same playerId again - joining and reconnecting
+  // are the same operation (see docs/architecture.md's note on this).
+  // Auto-starts the game once both slots are filled.
   const joinMatch = pathname.match(/^\/api\/games\/([a-zA-Z0-9]+)\/join$/);
   if (joinMatch && req.method === 'POST') {
     const id = joinMatch[1];
@@ -164,18 +195,31 @@ const server = http.createServer(async (req, res) => {
     if (!record) return sendJSON(res, 404, { error: 'not-found' });
     if (record.mode !== 'multiplayer') return sendJSON(res, 400, { error: 'not-multiplayer' });
 
-    const openSlot = SLOTS.find((slot) => record.lobby[slot].playerId === null);
-    if (!openSlot) return sendJSON(res, 400, { error: 'lobby-full' });
+    let body;
+    try {
+      body = await readJsonBody(req);
+    } catch (e) {
+      return sendJSON(res, 400, { error: 'invalid-json' });
+    }
+
+    const slot = slotForToken(record.lobby, body.inviteToken);
+    if (!slot) return sendJSON(res, 400, { error: 'invalid-invite' });
+
+    const existingPlayerId = record.lobby[slot].playerId;
+    if (existingPlayerId) {
+      // Reconnect: same token, same playerId, no new state.
+      return sendJSON(res, 200, { gameId: id, playerId: existingPlayerId, slot, state: record.state });
+    }
 
     const playerId = crypto.randomBytes(8).toString('hex');
-    record.lobby[openSlot].playerId = playerId;
+    record.lobby[slot].playerId = playerId;
 
-    if (SLOTS.every((slot) => record.lobby[slot].playerId !== null)) {
+    if (SLOTS.every((s) => record.lobby[s].playerId !== null)) {
       record.state = startGame(record.state);
       broadcastState(record);
     }
 
-    sendJSON(res, 200, { gameId: id, playerId, slot: openSlot, state: record.state });
+    sendJSON(res, 200, { gameId: id, playerId, slot, state: record.state });
     return;
   }
 
