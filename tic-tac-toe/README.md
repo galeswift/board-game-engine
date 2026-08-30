@@ -34,6 +34,30 @@ same database - there's no mocking of the HTTP layer or the DB.
 ## Environment variables
 
 - `PORT` - defaults to `3000`.
-- `DATABASE_URL` - Postgres connection string. Railway's Postgres plugin
-  sets this automatically when attached to this service; for local dev
-  it defaults to the `docker-compose.yml` database.
+- `DATABASE_URL` - Postgres connection string. For local dev it defaults
+  to the `docker-compose.yml` database; on Railway it must be set
+  explicitly (see below).
+
+## Railway setup: attaching Postgres
+
+This is a **one-time step per Railway environment**, not something to
+redo on every deploy - once `DATABASE_URL` is set on the service it
+persists across every future push automatically. If it's ever missing
+(a fresh environment, a recreated project), the server fails fast on
+startup and shows up as a failed deployment in Railway's dashboard - it
+can't silently ship broken, so there's no risk of not noticing.
+
+Using the [Railway CLI](https://docs.railway.com/guides/cli), from this
+folder:
+
+```
+railway link                # select this project/service if not already linked
+railway add --database postgres
+railway variables --set DATABASE_URL='${{Postgres.DATABASE_URL}}' --service tic-tac-toe
+```
+
+This provisions a Postgres plugin in the project and points this
+service's `DATABASE_URL` at it. Railway intentionally doesn't
+auto-provision billed infrastructure just from a git push - this has to
+be a deliberate step, but scripting it here means it's a copy-pasteable
+command rather than a "remember which dashboard buttons to click" task.
