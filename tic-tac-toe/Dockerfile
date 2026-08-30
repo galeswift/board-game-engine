@@ -5,7 +5,7 @@ WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm install --omit=dev
 
-COPY server.js engine.js ./
+COPY server.js engine.js db.js ./
 COPY public ./public
 
 EXPOSE 3000

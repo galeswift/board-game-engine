@@ -17,9 +17,10 @@ it unless explicitly told otherwise.
   the full architecture without being asked). It has since grown async
   multiplayer: a `lobby` status/phase, `playerId`-scoped turn
   enforcement, per-slot invite-link identity (see `docs/architecture.md`
-  Section 6 and "Client Authority: Zero"), and a WebSocket live-push
-  channel — the last of these is why it's no longer zero-dependency (see
-  below).
+  Section 6 and "Client Authority: Zero"), a WebSocket live-push
+  channel, and Postgres-backed persistence — the last two are why it's
+  no longer zero-dependency (see below), and why it now needs a
+  reachable database to run at all.
 - **`patchwork/`** — scaffold only: currently a structural clone of
   `tic-tac-toe/` (same server.js/engine.js split, same game rules),
   deployable but not yet real Patchwork. Real rules per the architecture
@@ -39,11 +40,13 @@ it unless explicitly told otherwise.
 - Keep dependencies minimal. `tic-tac-toe/` intentionally used only
   Node's built-in `http` module up through its first pass — prefer that
   pattern unless a real need for a framework/library comes up. It now
-  carries one real dependency, `ws`, for its WebSocket live-push
-  channel — a deliberate, discussed exception (see
-  `tic-tac-toe/server.js`'s top comment), not a quiet departure from
-  this convention. A second dependency, `pg` (Postgres), is planned next
-  for persisting lobby/game state across restarts.
+  carries two real dependencies, deliberate and discussed rather than a
+  quiet departure from this convention (see `tic-tac-toe/server.js`'s
+  top comment): `ws` for its WebSocket live-push channel, and `pg` for
+  persisting lobby/game state in Postgres so it survives a
+  restart/redeploy (`tic-tac-toe/db.js`). Running or testing
+  `tic-tac-toe/` now requires a reachable Postgres — see
+  `tic-tac-toe/README.md`.
 - Rules/actions should be pure functions: `(state, input) -> result`,
   never mutating the input in place. This holds even in the simplified
   `tic-tac-toe/` first pass.

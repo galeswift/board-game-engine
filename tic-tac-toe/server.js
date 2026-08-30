@@ -1,9 +1,9 @@
 'use strict';
 
-// One real dependency now: `ws`, for the live push channel (see
-// docs/architecture.md's "Client Authority: Zero" section and
-// CLAUDE.md's dependency note). Everything else stays on Node's
-// built-in `http` module, per this project's usual pattern.
+// Two real dependencies now: `ws` for the live push channel, `pg` for
+// persistence (see docs/architecture.md's "Client Authority: Zero"
+// section and CLAUDE.md's dependency notes). Everything else stays on
+// Node's built-in `http` module, per this project's usual pattern.
 
 const http = require('http');
 const fs = require('fs');
@@ -11,23 +11,17 @@ const path = require('path');
 const crypto = require('crypto');
 const { WebSocketServer, WebSocket } = require('ws');
 const { createGame, applyAction, queryLegalActions, startGame } = require('./engine');
+const { ensureSchema, insertGame, getGame, saveGame } = require('./db');
 
 const PORT = process.env.PORT || 3000;
 const PUBLIC_DIR = path.join(__dirname, 'public');
 const SLOTS = ['X', 'O'];
 
-// In-memory store. Fine for a first pass; games (and their connected
-// sockets) are lost on redeploy/restart. Each entry is:
-//   { state, mode, lobby, sockets }
-// `state` is the pure engine state. `mode` is 'local' | 'multiplayer'.
-// `lobby` (multiplayer only) is { X: { playerId, token }, O: { playerId, token } } -
-// this is server-owned identity bookkeeping, not engine state; engine.js
-// stays identity-free. A slot's `token` is generated once at creation
-// and is the only way to claim (or reconnect to) that slot - see
-// slotForToken and the /join handler below. `sockets` is a runtime-only
-// Set of live WebSocket connections - never persisted, never part of
-// engine state.
-const games = new Map();
+// Runtime-only: live WebSocket connections per game, keyed by gameId.
+// Never persisted (a socket can't be serialized) and not affected by a
+// restart the way `db.js`'s rows are - a reconnecting client just opens
+// a fresh socket against whatever db.js already has stored.
+const socketsByGame = new Map();
 
 // A slot's playerId, or null if the game is local / the id matches
 // nothing. Multiplayer identity lives entirely in `lobby`, not in
@@ -109,8 +103,10 @@ function readJsonBody(req) {
 // the same per-caller scoping GET /actions applies. Only called after a
 // real state change (a successful action, or the lobby filling up) - a
 // rejected action has nothing new to tell anyone.
-function broadcastState(record) {
-  for (const socket of record.sockets) {
+function broadcastState(gameId, record) {
+  const sockets = socketsByGame.get(gameId);
+  if (!sockets) return;
+  for (const socket of sockets) {
     if (socket.readyState !== WebSocket.OPEN) continue;
     const actions = scopedActions(record, socket.playerId);
     socket.send(JSON.stringify({ type: 'state', state: record.state, actions }));
@@ -121,9 +117,11 @@ function broadcastState(record) {
 // UI show "opponent connected/disconnected" without that status having
 // any bearing on slot ownership or turn order, both of which are
 // entirely `lobby`'s job.
-function broadcastPresence(record, slot, connected, exclude) {
+function broadcastPresence(gameId, slot, connected, exclude) {
+  const sockets = socketsByGame.get(gameId);
+  if (!sockets) return;
   const body = JSON.stringify({ type: 'presence', slot, connected });
-  for (const socket of record.sockets) {
+  for (const socket of sockets) {
     if (socket === exclude || socket.readyState !== WebSocket.OPEN) continue;
     socket.send(body);
   }
@@ -151,7 +149,7 @@ const server = http.createServer(async (req, res) => {
         O: { playerId: null, token: crypto.randomBytes(12).toString('hex') },
       }
       : null;
-    games.set(id, { state, mode, lobby, sockets: new Set() });
+    await insertGame(id, mode, state, lobby);
     if (mode === 'multiplayer') {
       // Invite tokens are returned only here, at creation - never echoed
       // back by any other endpoint (GET /:id's lobby summary is
@@ -169,7 +167,7 @@ const server = http.createServer(async (req, res) => {
   // can show "waiting for player O" - never the tokens themselves.
   const gameMatch = pathname.match(/^\/api\/games\/([a-zA-Z0-9]+)$/);
   if (gameMatch && req.method === 'GET') {
-    const record = games.get(gameMatch[1]);
+    const record = await getGame(gameMatch[1]);
     if (!record) return sendJSON(res, 404, { error: 'not-found' });
     const response = { gameId: gameMatch[1], mode: record.mode, state: record.state };
     if (record.mode === 'multiplayer') {
@@ -191,7 +189,7 @@ const server = http.createServer(async (req, res) => {
   const joinMatch = pathname.match(/^\/api\/games\/([a-zA-Z0-9]+)\/join$/);
   if (joinMatch && req.method === 'POST') {
     const id = joinMatch[1];
-    const record = games.get(id);
+    const record = await getGame(id);
     if (!record) return sendJSON(res, 404, { error: 'not-found' });
     if (record.mode !== 'multiplayer') return sendJSON(res, 400, { error: 'not-multiplayer' });
 
@@ -207,7 +205,7 @@ const server = http.createServer(async (req, res) => {
 
     const existingPlayerId = record.lobby[slot].playerId;
     if (existingPlayerId) {
-      // Reconnect: same token, same playerId, no new state.
+      // Reconnect: same token, same playerId, no new state, no write.
       return sendJSON(res, 200, { gameId: id, playerId: existingPlayerId, slot, state: record.state });
     }
 
@@ -216,7 +214,10 @@ const server = http.createServer(async (req, res) => {
 
     if (SLOTS.every((s) => record.lobby[s].playerId !== null)) {
       record.state = startGame(record.state);
-      broadcastState(record);
+    }
+    await saveGame(id, { state: record.state, lobby: record.lobby });
+    if (record.state.status === 'in-progress') {
+      broadcastState(id, record);
     }
 
     sendJSON(res, 200, { gameId: id, playerId, slot, state: record.state });
@@ -231,7 +232,7 @@ const server = http.createServer(async (req, res) => {
   const actionMatch = pathname.match(/^\/api\/games\/([a-zA-Z0-9]+)\/actions$/);
   if (actionMatch && req.method === 'GET') {
     const id = actionMatch[1];
-    const record = games.get(id);
+    const record = await getGame(id);
     if (!record) return sendJSON(res, 404, { error: 'not-found' });
     const playerId = url.searchParams.get('playerId');
     sendJSON(res, 200, { gameId: id, actions: scopedActions(record, playerId) });
@@ -243,7 +244,7 @@ const server = http.createServer(async (req, res) => {
   // is; local games are unchanged (no identity to check).
   if (actionMatch && req.method === 'POST') {
     const id = actionMatch[1];
-    const record = games.get(id);
+    const record = await getGame(id);
     if (!record) return sendJSON(res, 404, { error: 'not-found' });
     try {
       const action = await readJsonBody(req);
@@ -259,7 +260,8 @@ const server = http.createServer(async (req, res) => {
       const result = applyAction(record.state, action);
       record.state = result.state;
       if (!result.error) {
-        broadcastState(record);
+        await saveGame(id, { state: record.state, lobby: record.lobby });
+        broadcastState(id, record);
       }
       sendJSON(res, result.error ? 400 : 200, {
         gameId: id,
@@ -276,11 +278,11 @@ const server = http.createServer(async (req, res) => {
   // an action, just not persisted (and not broadcast - nothing actually
   // changed). applyAction is already pure, so preview and commit are
   // literally the same function call - only whether the result gets
-  // written to `games`/pushed over the socket differs.
+  // written to storage/pushed over the socket differs.
   const previewMatch = pathname.match(/^\/api\/games\/([a-zA-Z0-9]+)\/actions\/preview$/);
   if (previewMatch && req.method === 'POST') {
     const id = previewMatch[1];
-    const record = games.get(id);
+    const record = await getGame(id);
     if (!record) return sendJSON(res, 404, { error: 'not-found' });
     try {
       const action = await readJsonBody(req);
@@ -319,8 +321,13 @@ const server = http.createServer(async (req, res) => {
 // everything else stays plain HTTP.
 const wss = new WebSocketServer({ noServer: true });
 
-wss.on('connection', (socket, record) => {
-  record.sockets.add(socket);
+wss.on('connection', (socket, gameId, lobby) => {
+  let sockets = socketsByGame.get(gameId);
+  if (!sockets) {
+    sockets = new Set();
+    socketsByGame.set(gameId, sockets);
+  }
+  sockets.add(socket);
 
   socket.on('message', (data) => {
     let message;
@@ -330,32 +337,42 @@ wss.on('connection', (socket, record) => {
       return;
     }
     if (message.type !== 'authenticate') return;
-    const slot = slotForPlayerId(record.lobby, message.playerId);
+    const slot = slotForPlayerId(lobby, message.playerId);
     if (!slot) return; // unrecognized playerId - stays an unauthenticated/spectator socket
     socket.playerId = message.playerId;
-    broadcastPresence(record, slot, true, socket);
+    broadcastPresence(gameId, slot, true, socket);
   });
 
   socket.on('close', () => {
-    record.sockets.delete(socket);
-    const slot = slotForPlayerId(record.lobby, socket.playerId);
-    if (slot) broadcastPresence(record, slot, false, socket);
+    sockets.delete(socket);
+    const slot = slotForPlayerId(lobby, socket.playerId);
+    if (slot) broadcastPresence(gameId, slot, false, socket);
   });
 });
 
-server.on('upgrade', (req, socket, head) => {
+server.on('upgrade', async (req, socket, head) => {
   const url = new URL(req.url, `http://${req.headers.host}`);
   const socketMatch = url.pathname.match(/^\/api\/games\/([a-zA-Z0-9]+)\/socket$/);
-  const record = socketMatch && games.get(socketMatch[1]);
+  const gameId = socketMatch && socketMatch[1];
+  const record = gameId && await getGame(gameId);
   if (!record) {
     socket.destroy();
     return;
   }
   wss.handleUpgrade(req, socket, head, (ws) => {
-    wss.emit('connection', ws, record);
+    wss.emit('connection', ws, gameId, record.lobby);
   });
 });
 
-server.listen(PORT, () => {
-  console.log(`Tic-tac-toe server listening on port ${PORT}`);
-});
+// Fail fast if the database isn't reachable - no retry/backoff, matching
+// this project's prototype-level error handling elsewhere.
+ensureSchema()
+  .then(() => {
+    server.listen(PORT, () => {
+      console.log(`Tic-tac-toe server listening on port ${PORT}`);
+    });
+  })
+  .catch((err) => {
+    console.error('Failed to reach the database:', err.code || err.message || err);
+    process.exit(1);
+  });

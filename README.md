@@ -2,17 +2,21 @@
 
 Prototypes for a board game rules engine, one folder per game:
 
-- **`tic-tac-toe/`** — first pass, deployable now. A deliberately simple
-  Node.js server (no dependencies) with an in-memory game store and a
-  mobile-friendly web UI.
+- **`tic-tac-toe/`** — deployable now, and the most advanced of the
+  three: a mobile-friendly web UI plus async multiplayer (lobbies,
+  per-slot invite links, a WebSocket live channel) with state persisted
+  in Postgres. See [`tic-tac-toe/README.md`](tic-tac-toe/README.md) for
+  local setup.
 - **`patchwork/`** — scaffold only, deployable now: a structural clone of
-  `tic-tac-toe/` (same server/engine split, same rules) standing in until
-  real Patchwork rules are built.
+  early tic-tac-toe (same server/engine split, same rules) standing in
+  until real Patchwork rules are built.
 - **`forbidden-island/`** — not yet implemented.
 
-Each folder is self-contained and deployable independently. This first
-pass keeps things simple on purpose — no shared package, no build step,
-no database.
+Each folder is self-contained and deployable independently — no shared
+package, no shared build step across folders. `tic-tac-toe/` has since
+grown two real dependencies (`ws`, `pg`) and a Postgres requirement of
+its own; `patchwork/` and `forbidden-island/` remain zero-dependency
+until they have a reason not to be.
 
 ## Project docs
 
@@ -27,7 +31,9 @@ no database.
 
 ```
 cd tic-tac-toe
-node server.js
+docker compose up -d   # local Postgres - see tic-tac-toe/README.md
+npm install
+npm start
 ```
 
 Then open `http://localhost:3000`.
@@ -47,7 +53,11 @@ this particular service should build:
 3. Once the service is created, open its **Settings** tab and set
    **Root Directory** to `tic-tac-toe`. This tells Railway to build and
    deploy only that folder, using its `Dockerfile`.
-4. Railway will assign a public URL automatically. Auto-deploy on push
+4. **For `tic-tac-toe/` specifically**: also add a Postgres plugin to
+   the same Railway project and attach it to this service so
+   `DATABASE_URL` is set — the server fails fast on startup without a
+   reachable database.
+5. Railway will assign a public URL automatically. Auto-deploy on push
    to `main` is on by default once a repo is connected this way.
 
 To deploy `patchwork/` (or `forbidden-island/` once it exists), repeat
