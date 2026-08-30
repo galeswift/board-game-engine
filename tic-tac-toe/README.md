@@ -47,17 +47,21 @@ persists across every future push automatically. If it's ever missing
 startup and shows up as a failed deployment in Railway's dashboard - it
 can't silently ship broken, so there's no risk of not noticing.
 
-Using the [Railway CLI](https://docs.railway.com/guides/cli), from this
-folder:
+Via the Railway dashboard:
 
-```
-railway link                # select this project/service if not already linked
-railway add --database postgres
-railway variables --set DATABASE_URL='${{Postgres.DATABASE_URL}}' --service tic-tac-toe
-```
+1. Open the `board-game-engine` project and click **New** → **Database**
+   → **Add PostgreSQL**. This provisions a Postgres service in the
+   project.
+2. Open the new Postgres service, go to its **Variables** (or
+   **Connect**) tab, and copy its connection string (usually shown as
+   `DATABASE_URL` or `DATABASE_PUBLIC_URL`).
+3. Open the `tic-tac-toe` service's **Variables** tab, add a new
+   variable named `DATABASE_URL`, and paste that connection string in
+   (Railway may also offer a "reference another service's variable"
+   option here instead of pasting a static value - either works).
+4. Redeploy the `tic-tac-toe` service if it doesn't happen
+   automatically after saving the variable.
 
-This provisions a Postgres plugin in the project and points this
-service's `DATABASE_URL` at it. Railway intentionally doesn't
-auto-provision billed infrastructure just from a git push - this has to
-be a deliberate step, but scripting it here means it's a copy-pasteable
-command rather than a "remember which dashboard buttons to click" task.
+Railway intentionally doesn't auto-provision billed infrastructure just
+from a git push - attaching a database has to be a deliberate step you
+take once in the dashboard.

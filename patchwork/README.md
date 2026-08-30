@@ -21,10 +21,9 @@ the root [README](../README.md) and `CLAUDE.md` for project context.
 channel, and Postgres-backed persistence (see its own README). None of
 that exists here yet — this scaffold is still the plain, zero-dependency,
 in-memory version. If/when Patchwork needs any of that, `tic-tac-toe/`'s
-implementation (and its README's Railway Postgres setup — a scripted
-`railway add --database postgres` + `railway variables` pair, not a
-manual dashboard step) is the pattern to reuse, pointed at a `patchwork`
-service with its own separate database.
+implementation (and its README's Railway Postgres setup steps) is the
+pattern to reuse, pointed at a `patchwork` service with its own separate
+database.
 
 ## Running locally
 
