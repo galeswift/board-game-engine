@@ -41,6 +41,19 @@ function slotForToken(lobby, token) {
   return SLOTS.find((slot) => lobby[slot].token === token) || null;
 }
 
+// Redacted lobby view for a multiplayer game: claimed/open per slot,
+// never the tokens. Shared by every endpoint that needs to tell a
+// client "who's here" (create, join, GET, and the WS state push) so a
+// UI can show a live player list without ever seeing anyone's invite
+// token, its own or anyone else's.
+function lobbySummary(record) {
+  if (record.mode !== 'multiplayer') return undefined;
+  return {
+    X: { claimed: record.lobby.X.playerId !== null },
+    O: { claimed: record.lobby.O.playerId !== null },
+  };
+}
+
 // The legal-actions list a specific caller is allowed to see. Local
 // games have no identity concept, so everyone sees the real domain
 // (unchanged pass-and-play behavior). Multiplayer games only reveal the
@@ -109,7 +122,7 @@ function broadcastState(gameId, record) {
   for (const socket of sockets) {
     if (socket.readyState !== WebSocket.OPEN) continue;
     const actions = scopedActions(record, socket.playerId);
-    socket.send(JSON.stringify({ type: 'state', state: record.state, actions }));
+    socket.send(JSON.stringify({ type: 'state', state: record.state, actions, lobby: lobbySummary(record) }));
   }
 }
 
@@ -152,10 +165,11 @@ const server = http.createServer(async (req, res) => {
     await insertGame(id, mode, state, lobby);
     if (mode === 'multiplayer') {
       // Invite tokens are returned only here, at creation - never echoed
-      // back by any other endpoint (GET /:id's lobby summary is
-      // claimed/open only, see below).
+      // back by any other endpoint (the lobby summary below is
+      // claimed/open only).
       const invites = SLOTS.map((slot) => ({ slot, token: lobby[slot].token }));
-      sendJSON(res, 201, { gameId: id, mode, state, invites });
+      const record = { mode, state, lobby };
+      sendJSON(res, 201, { gameId: id, mode, state, invites, lobby: lobbySummary(record) });
     } else {
       sendJSON(res, 201, { gameId: id, state }); // unchanged shape for local
     }
@@ -169,14 +183,7 @@ const server = http.createServer(async (req, res) => {
   if (gameMatch && req.method === 'GET') {
     const record = await getGame(gameMatch[1]);
     if (!record) return sendJSON(res, 404, { error: 'not-found' });
-    const response = { gameId: gameMatch[1], mode: record.mode, state: record.state };
-    if (record.mode === 'multiplayer') {
-      response.lobby = {
-        X: { claimed: record.lobby.X.playerId !== null },
-        O: { claimed: record.lobby.O.playerId !== null },
-      };
-    }
-    sendJSON(res, 200, response);
+    sendJSON(res, 200, { gameId: gameMatch[1], mode: record.mode, state: record.state, lobby: lobbySummary(record) });
     return;
   }
 
@@ -206,7 +213,7 @@ const server = http.createServer(async (req, res) => {
     const existingPlayerId = record.lobby[slot].playerId;
     if (existingPlayerId) {
       // Reconnect: same token, same playerId, no new state, no write.
-      return sendJSON(res, 200, { gameId: id, playerId: existingPlayerId, slot, state: record.state });
+      return sendJSON(res, 200, { gameId: id, playerId: existingPlayerId, slot, state: record.state, lobby: lobbySummary(record) });
     }
 
     const playerId = crypto.randomBytes(8).toString('hex');
@@ -220,7 +227,7 @@ const server = http.createServer(async (req, res) => {
       broadcastState(id, record);
     }
 
-    sendJSON(res, 200, { gameId: id, playerId, slot, state: record.state });
+    sendJSON(res, 200, { gameId: id, playerId, slot, state: record.state, lobby: lobbySummary(record) });
     return;
   }
 

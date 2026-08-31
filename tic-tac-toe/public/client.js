@@ -7,6 +7,9 @@ const invitePanelEl = document.getElementById('invitePanel');
 const inviteLinkInputEl = document.getElementById('inviteLinkInput');
 const copyInviteBtn = document.getElementById('copyInviteBtn');
 const reconnectNoticeEl = document.getElementById('reconnectNotice');
+const lobbyStatusEl = document.getElementById('lobbyStatus');
+const myRoleEl = document.getElementById('myRole');
+const playerListEl = document.getElementById('playerList');
 
 let gameId = null;
 let mode = 'local';
@@ -15,8 +18,14 @@ let mode = 'local';
 // see reconnectNoticeEl below) means losing your seat for good; that's
 // a deliberate, documented tradeoff, not an oversight.
 let playerId = null;
+let mySlot = null; // 'X' | 'O', whichever slot `playerId` claimed
 let state = null;
 let legalActions = [];
+// { X: { claimed }, O: { claimed } } for multiplayer games - never
+// contains tokens, just enough to render a player list. Kept up to
+// date the same way `state` is: every response that can change it
+// (create, join, the WS push) carries a fresh copy.
+let lobby = null;
 
 function inviteLink(id, token) {
   const link = new URL(`${window.location.origin}${window.location.pathname}`);
@@ -69,6 +78,33 @@ function render() {
     invitePanelEl.hidden = true;
   }
   reconnectNoticeEl.hidden = !(mode === 'multiplayer' && playerId);
+  renderLobbyStatus();
+}
+
+function renderLobbyStatus() {
+  if (mode !== 'multiplayer' || !lobby) {
+    lobbyStatusEl.hidden = true;
+    return;
+  }
+  lobbyStatusEl.hidden = false;
+  myRoleEl.textContent = mySlot ? `You are ${mySlot}` : 'Spectating';
+
+  playerListEl.innerHTML = '';
+  for (const slot of ['X', 'O']) {
+    const li = document.createElement('li');
+    const claimed = lobby[slot].claimed;
+    const isTurn = state.status === 'in-progress' && state.currentPlayer === slot;
+
+    const label = document.createElement('span');
+    label.textContent = slot + (slot === mySlot ? ' (you)' : '');
+    const detail = document.createElement('span');
+    detail.textContent = !claimed ? 'waiting…' : isTurn ? "their turn" : 'joined';
+
+    li.append(label, detail);
+    li.classList.toggle('is-you', slot === mySlot);
+    li.classList.toggle('is-turn', isTurn);
+    playerListEl.appendChild(li);
+  }
 }
 
 // Live push: lets the *other* player's browser find out a move happened
@@ -91,6 +127,7 @@ function connectSocket() {
     if (message.type === 'state') {
       state = message.state;
       legalActions = message.actions || [];
+      if (message.lobby) lobby = message.lobby;
       render();
     }
     // 'presence' messages are cosmetic-only and not wired into the UI
@@ -128,7 +165,9 @@ async function joinLobby(inviteToken) {
   const data = await res.json();
   if (data.playerId) {
     playerId = data.playerId;
+    mySlot = data.slot;
     state = data.state;
+    lobby = data.lobby;
   }
 }
 
@@ -142,6 +181,7 @@ async function createGame(requestedMode) {
   gameId = data.gameId;
   mode = data.mode || 'local';
   state = data.state;
+  lobby = data.lobby || null;
 
   const url = new URL(window.location);
   url.searchParams.set('game', gameId);
@@ -173,6 +213,7 @@ async function loadGame(id, joinToken) {
   gameId = data.gameId;
   mode = data.mode || 'local';
   state = data.state;
+  lobby = data.lobby || null;
   if (mode === 'multiplayer' && joinToken) {
     await joinLobby(joinToken); // first visit or a reconnect - same call either way
   }

@@ -165,6 +165,7 @@ test('WebSocket live channel', async (t) => {
 
       assert.deepEqual(messageX.actions, [], "not X's turn anymore");
       assert.equal(messageO.actions[0]?.params.cell.domain.length, 8, "it's now O's turn");
+      assert.deepEqual(messageX.lobby, { X: { claimed: true }, O: { claimed: true } }, 'the push includes a live lobby summary too');
 
       socketX.close();
       socketO.close();

@@ -143,11 +143,25 @@ test('legal actions and preview endpoints', async (t) => {
     });
 
     await t.test('creating a multiplayer game starts in the lobby with two distinct invite tokens', async () => {
-      const { mode, state, invites } = await createMultiplayerGame();
+      const { mode, state, invites, lobby } = await createMultiplayerGame();
       assert.equal(mode, 'multiplayer');
       assert.equal(state.status, 'lobby');
       assert.equal(invites.length, 2);
       assert.notEqual(tokenFor(invites, 'X'), tokenFor(invites, 'O'));
+      assert.deepEqual(lobby, { X: { claimed: false }, O: { claimed: false } });
+    });
+
+    await t.test('join responses include a live lobby summary, never the tokens', async () => {
+      const { gameId, invites } = await createMultiplayerGame();
+      const xToken = tokenFor(invites, 'X');
+
+      const first = await join(gameId, xToken);
+      assert.deepEqual(first.lobby, { X: { claimed: true }, O: { claimed: false } });
+
+      const second = await join(gameId, tokenFor(invites, 'O'));
+      assert.deepEqual(second.lobby, { X: { claimed: true }, O: { claimed: true } });
+
+      assert.equal(JSON.stringify(first).includes(xToken), false, 'tokens must never be echoed back');
     });
 
     await t.test('joining with a slot\'s token claims it, auto-starting once both are filled', async () => {
