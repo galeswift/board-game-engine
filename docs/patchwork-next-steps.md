@@ -155,7 +155,8 @@ instead of prototyped in vanilla JS and then rewritten.
 - **#3 — Vite + React conversion.** Done: `patchwork/web/` is a new Vite
   React app (its own `package.json`, kept separate from the server's so
   React/Vite deps never enter the server's production Dockerfile stage).
-  Components: `App`, `Board`, `LobbyStatus`, `InvitePanel`, `Controls` -
+  Components: `App`, `Board` (since replaced by `QuiltBoard` - see the
+  gameplay slice below), `LobbyStatus`, `InvitePanel`, `Controls` -
   a like-for-like port of the old vanilla-JS client's behavior (create
   local/multiplayer, join-by-invite-token, `?game=&invite=` URL params,
   WS live push, "Client Authority: Zero" legal-actions scoping), same
@@ -175,19 +176,58 @@ instead of prototyped in vanilla JS and then rewritten.
   work. The image-plugin convention from #5 stays unwired - no patch art
   to plug in until the real engine and its UI exist.
 
+- **#2, the actual Railway click-through — done.** The user created the
+  Railway project, pointed its Root Directory at `patchwork/`, and
+  provisioned the Postgres plugin. Deployed and confirmed working.
+
+- **First real gameplay slice: pick a patch, rotate, place it, pass the
+  turn.** A deliberately minimal MVP cut, not the full engine below -
+  see the plan at `C:\Users\kmiro\.claude\plans\quirky-kindling-pebble.md`
+  on this machine for the full design rationale. `engine.js` was
+  rewritten wholesale (no longer tic-tac-toe's placeholder): state is
+  `{ quiltBoards: { X, O }, availablePatches, currentPlayer, status }`,
+  a shared/depleting pool of all 33 real patches (`patchwork/patches.js`,
+  new - the reference data above plus `getPatch`/`rotatePatch`). A
+  player picks a patch, can rotate it 90°-at-a-time (no flip), then
+  places it on their own 9x9 board; turn flips to the other lobby slot
+  on a successful placement. Only legality check is geometric (fits the
+  grid, doesn't overlap that player's own already-placed patches) - no
+  cost, no time track, no button economy, no scoring, no win condition,
+  all deliberately out of scope for this pass.
+
+  Extended (not replaced) the "Client Authority: Zero" pattern:
+  `queryLegalActions(state, { patchId, rotation })` now takes an
+  optional selection - no patch picked yet returns the pickable-patch
+  domain (`selectPatch`), a patch+rotation picked returns the anchor
+  placement domain (`placePatch`) for that specific choice.
+  `GET .../actions` gained optional `patchId`/`rotation` query params
+  wired straight through; `POST .../actions` and `.../preview` needed
+  no change, they already forward the raw action body. The client
+  fetches the placement domain fresh every time the selection or
+  rotation changes - it never computes fit/overlap itself.
+
+  Frontend: `web/src/data/patches.js` (a trimmed client-side duplicate
+  of the server's patch geometry, display-only, never used for
+  legality), `components/QuiltBoard.jsx` (replaces the old `Board.jsx`),
+  `PatchPicker.jsx`, `RotateControl.jsx`, `PatchShape.jsx`. All 33
+  patches always shown, greyed out once taken from the pool.
+
+  All tests (engine/server/socket/persistence/browser, 45 total)
+  rewritten for the new action vocabulary and passing, including two
+  new Playwright scenarios: local pass-and-play select→rotate→place,
+  and a multiplayer placement live-updating a second browser context
+  with the turn flipped and the picker in sync.
+
 ### Not started
-- **#2, the actual Railway click-through.** The README section is
-  written (see "Done" above); creating the `patchwork` Railway service
-  and its Postgres plugin in the dashboard is still an outstanding
-  manual step for the user.
-- **The real Patchwork engine and UI.** Asymmetric, time-track-driven
-  turn order, per-player economy (buttons, quilt board), phase
-  transitions (setup → play → scoring → game over) — see
-  `docs/architecture.md` Section 12. This replaces `engine.js` wholesale
-  and is where the #5 image-plugin convention (`<PatchArt id>` in
-  `web/src/`) finally gets wired in, once there's a real quilt-piece UI
-  to plug it into. Natural component boundaries: quilt board, patch
-  piece, market, time track, player stats panel.
+- **The full real Patchwork engine and UI.** Asymmetric, time-track-driven
+  turn order, per-player economy (buttons), phase transitions (setup →
+  play → scoring → game over), actual button cost to buy a patch — see
+  `docs/architecture.md` Section 12. This is where the #5 image-plugin
+  convention (`<PatchArt id>` in `web/src/`) finally gets wired in.
+  `PATCHES`' `cost`/`time`/`income` fields already exist in
+  `patchwork/patches.js` (the server-side data module), unused by the
+  engine yet - `web/src/data/patches.js`'s client-side copy deliberately
+  trimmed them out since nothing client-side needs them yet either.
 
 ## Key decisions/constraints to carry forward
 

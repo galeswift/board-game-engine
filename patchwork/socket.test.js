@@ -71,8 +71,8 @@ function tokenFor(invites, slot) {
   return invites.find((i) => i.slot === slot).token;
 }
 
-async function placePiece(gameId, playerId, cell = 0) {
-  const action = { type: 'placePiece', cell };
+async function placePatch(gameId, playerId, patchId = 'patch-01', row = 0, col = 0) {
+  const action = { type: 'placePatch', patchId, rotation: 0, row, col };
   if (playerId) action.playerId = playerId;
   return fetch(`${BASE}/api/games/${gameId}/actions`, {
     method: 'POST',
@@ -111,13 +111,13 @@ test('WebSocket live channel', async (t) => {
         fetch(`${BASE}/api/games/${gameId}/actions`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ type: 'placePiece', cell: 4 }),
+          body: JSON.stringify({ type: 'placePatch', patchId: 'patch-01', rotation: 0, row: 0, col: 0 }),
         }),
       ]);
 
       for (const message of [messageA, messageB]) {
         assert.equal(message.type, 'state');
-        assert.equal(message.state.board[4], 'X');
+        assert.equal(message.state.quiltBoards.X[0], 'patch-01');
       }
 
       socketA.close();
@@ -129,12 +129,12 @@ test('WebSocket live channel', async (t) => {
       const socket = new WebSocket(`${WS_BASE}/api/games/${gameId}/socket`);
       await waitForOpen(socket);
 
-      // An out-of-range cell is rejected by applyAction and should never
-      // reach the socket.
+      // An out-of-bounds placement is rejected by applyAction and should
+      // never reach the socket.
       await fetch(`${BASE}/api/games/${gameId}/actions`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ type: 'placePiece', cell: 99 }),
+        body: JSON.stringify({ type: 'placePatch', patchId: 'patch-01', rotation: 0, row: 8, col: 0 }),
       });
 
       await assert.rejects(() => waitForMessage(socket, 500));
@@ -160,11 +160,11 @@ test('WebSocket live channel', async (t) => {
       const [messageX, messageO] = await Promise.all([
         waitForMessage(socketX),
         waitForMessage(socketO),
-        placePiece(gameId, x.playerId),
+        placePatch(gameId, x.playerId),
       ]);
 
       assert.deepEqual(messageX.actions, [], "not X's turn anymore");
-      assert.equal(messageO.actions[0]?.params.cell.domain.length, 8, "it's now O's turn");
+      assert.equal(messageO.actions[0]?.params.patchId.domain.length, 32, "it's now O's turn, one patch already taken");
       assert.deepEqual(messageX.lobby, { X: { claimed: true }, O: { claimed: true } }, 'the push includes a live lobby summary too');
 
       socketX.close();

@@ -5,9 +5,10 @@
 // section and CLAUDE.md's dependency notes). Everything else stays on
 // Node's built-in `http` module, per this project's usual pattern.
 //
-// This is a straight port of tic-tac-toe/server.js's backend plumbing
-// (lobby/identity/WS/persistence) - see docs/patchwork-next-steps.md.
-// The rules underneath (engine.js) are still tic-tac-toe's, on purpose.
+// The lobby/identity/WS/persistence plumbing below is a straight port
+// of tic-tac-toe/server.js's - see docs/patchwork-next-steps.md.
+// engine.js now runs the first real slice of Patchwork's own rules
+// (pick/rotate/place a patch), not tic-tac-toe's placeholder anymore.
 
 const http = require('http');
 const fs = require('fs');
@@ -64,8 +65,8 @@ function lobbySummary(record) {
 // real domain to whichever slot's turn it actually is - anyone else
 // (wrong player, unrecognized playerId, a spectator) gets an empty
 // list, same principle GET /actions and the WS state push both apply.
-function scopedActions(record, playerId) {
-  const actions = queryLegalActions(record.state);
+function scopedActions(record, playerId, selection) {
+  const actions = queryLegalActions(record.state, selection);
   if (record.mode !== 'multiplayer') return actions;
   const slot = slotForPlayerId(record.lobby, playerId);
   return slot && slot === record.state.currentPlayer ? actions : [];
@@ -246,7 +247,13 @@ const server = http.createServer(async (req, res) => {
     const record = await getGame(id);
     if (!record) return sendJSON(res, 404, { error: 'not-found' });
     const playerId = url.searchParams.get('playerId');
-    sendJSON(res, 200, { gameId: id, actions: scopedActions(record, playerId) });
+    // Optional: once a client has picked a patch, it asks here for the
+    // domain of legal placements for that specific patch/rotation - see
+    // engine.js's queryLegalActions. Omitted, this just returns the
+    // pickable-patches domain instead.
+    const patchId = url.searchParams.get('patchId');
+    const selection = patchId ? { patchId, rotation: url.searchParams.get('rotation') } : undefined;
+    sendJSON(res, 200, { gameId: id, actions: scopedActions(record, playerId, selection) });
     return;
   }
 

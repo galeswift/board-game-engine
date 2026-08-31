@@ -4,9 +4,11 @@ const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const { spawn } = require('node:child_process');
 const path = require('node:path');
+const { PATCHES } = require('./patches');
 
 const PORT = 35699; // distinct from tic-tac-toe's *.test.js ports (345xx/346xx)
 const BASE = `http://localhost:${PORT}`;
+const ALL_PATCH_IDS = PATCHES.map((p) => p.id);
 
 async function waitForServer(timeoutMs = 5000) {
   const deadline = Date.now() + timeoutMs;
@@ -48,14 +50,24 @@ function tokenFor(invites, slot) {
   return invites.find((i) => i.slot === slot).token;
 }
 
-async function placePiece(gameId, cell, playerId) {
-  const action = { type: 'placePiece', cell };
+async function placePatch(gameId, { patchId, rotation = 0, row, col, playerId }) {
+  const action = { type: 'placePatch', patchId, rotation, row, col };
   if (playerId) action.playerId = playerId;
   return fetch(`${BASE}/api/games/${gameId}/actions`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(action),
   });
+}
+
+async function fetchActions(gameId, { playerId, patchId, rotation } = {}) {
+  const params = new URLSearchParams();
+  if (playerId) params.set('playerId', playerId);
+  if (patchId) params.set('patchId', patchId);
+  if (rotation != null) params.set('rotation', String(rotation));
+  const qs = params.toString();
+  const res = await fetch(`${BASE}/api/games/${gameId}/actions${qs ? `?${qs}` : ''}`);
+  return res.json();
 }
 
 test('legal actions and preview endpoints', async (t) => {
@@ -67,31 +79,43 @@ test('legal actions and preview endpoints', async (t) => {
   try {
     await waitForServer();
 
-    await t.test('GET /api/games/:id/actions lists every legal cell on a fresh game', async () => {
+    await t.test('GET /api/games/:id/actions lists every patch as pickable on a fresh game', async () => {
       const { gameId } = await createGame();
       const res = await fetch(`${BASE}/api/games/${gameId}/actions`);
       assert.equal(res.status, 200);
       const body = await res.json();
       assert.deepEqual(body.actions, [
-        { type: 'placePiece', params: { cell: { domain: [0, 1, 2, 3, 4, 5, 6, 7, 8] } } },
+        { type: 'selectPatch', params: { patchId: { domain: ALL_PATCH_IDS } } },
       ]);
     });
 
-    await t.test('legal actions domain shrinks after a move', async () => {
+    await t.test('the pickable-patch domain shrinks after a placement', async () => {
       const { gameId } = await createGame();
-      await placePiece(gameId, 4);
-      const res = await fetch(`${BASE}/api/games/${gameId}/actions`);
-      const { actions } = await res.json();
-      assert.deepEqual(actions[0].params.cell.domain, [0, 1, 2, 3, 5, 6, 7, 8]);
+      await placePatch(gameId, { patchId: 'patch-01', row: 0, col: 0 });
+      const { actions } = await fetchActions(gameId);
+      assert.equal(actions[0].params.patchId.domain.includes('patch-01'), false);
+      assert.equal(actions[0].params.patchId.domain.length, 32);
     });
 
-    await t.test('legal actions is empty once the game is over', async () => {
+    await t.test('GET /actions with a patchId reports the placement-anchor domain for that patch', async () => {
       const { gameId } = await createGame();
-      for (const cell of [0, 3, 1, 4, 2]) {
-        await placePiece(gameId, cell);
-      }
-      const res = await fetch(`${BASE}/api/games/${gameId}/actions`);
-      const { actions } = await res.json();
+      const { actions } = await fetchActions(gameId, { patchId: 'patch-01' });
+      assert.equal(actions[0].type, 'placePatch');
+      assert.equal(actions[0].params.patchId, 'patch-01');
+      assert.equal(actions[0].params.rotation, 0, 'defaults to rotation 0');
+      assert.ok(actions[0].params.anchor.domain.length > 0);
+    });
+
+    await t.test('GET /actions honors an explicit rotation parameter', async () => {
+      const { gameId } = await createGame();
+      const { actions } = await fetchActions(gameId, { patchId: 'patch-01', rotation: 1 });
+      assert.equal(actions[0].params.rotation, 1);
+    });
+
+    await t.test('GET /actions with an already-placed patchId reports no placements', async () => {
+      const { gameId } = await createGame();
+      await placePatch(gameId, { patchId: 'patch-01', row: 0, col: 0 });
+      const { actions } = await fetchActions(gameId, { patchId: 'patch-01' });
       assert.deepEqual(actions, []);
     });
 
@@ -106,16 +130,16 @@ test('legal actions and preview endpoints', async (t) => {
       const previewRes = await fetch(`${BASE}/api/games/${gameId}/actions/preview`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ type: 'placePiece', cell: 0 }),
+        body: JSON.stringify({ type: 'placePatch', patchId: 'patch-01', rotation: 0, row: 0, col: 0 }),
       });
       assert.equal(previewRes.status, 200);
       const previewBody = await previewRes.json();
-      assert.equal(previewBody.preview.board[0], 'X');
+      assert.equal(previewBody.preview.quiltBoards.X[0], 'patch-01');
       assert.equal(previewBody.error, null);
 
       const stateRes = await fetch(`${BASE}/api/games/${gameId}`);
       const { state } = await stateRes.json();
-      assert.equal(state.board[0], null, 'preview must not persist to the stored game');
+      assert.equal(state.quiltBoards.X[0], null, 'preview must not persist to the stored game');
     });
 
     await t.test('POST preview surfaces the same errors a real action would', async () => {
@@ -123,21 +147,19 @@ test('legal actions and preview endpoints', async (t) => {
       const res = await fetch(`${BASE}/api/games/${gameId}/actions/preview`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ type: 'placePiece', cell: 99 }),
+        body: JSON.stringify({ type: 'placePatch', patchId: 'patch-01', rotation: 0, row: 8, col: 0 }),
       });
       assert.equal(res.status, 400);
-      assert.deepEqual(await res.json(), {
-        gameId,
-        preview: { board: Array(9).fill(null), currentPlayer: 'X', winner: null, status: 'in-progress' },
-        error: 'invalid-cell',
-      });
+      const body = await res.json();
+      assert.equal(body.error, 'invalid-placement');
+      assert.equal(body.preview.quiltBoards.X.every((c) => c === null), true, 'a rejected preview reports the unchanged state');
     });
 
     await t.test('POST preview 404s for an unknown game', async () => {
       const res = await fetch(`${BASE}/api/games/doesnotexist/actions/preview`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ type: 'placePiece', cell: 0 }),
+        body: JSON.stringify({ type: 'placePatch', patchId: 'patch-01', rotation: 0, row: 0, col: 0 }),
       });
       assert.equal(res.status, 404);
     });
@@ -230,7 +252,7 @@ test('legal actions and preview endpoints', async (t) => {
     await t.test('actions before the lobby is full are rejected', async () => {
       const { gameId, invites } = await createMultiplayerGame();
       const { playerId } = await join(gameId, tokenFor(invites, 'X'));
-      const res = await placePiece(gameId, 0, playerId);
+      const res = await placePatch(gameId, { patchId: 'patch-01', row: 0, col: 0, playerId });
       assert.equal(res.status, 400);
       assert.equal((await res.json()).error, 'lobby-not-started');
     });
@@ -240,11 +262,11 @@ test('legal actions and preview endpoints', async (t) => {
       await join(gameId, tokenFor(invites, 'X'));
       await join(gameId, tokenFor(invites, 'O'));
 
-      const missing = await placePiece(gameId, 0);
+      const missing = await placePatch(gameId, { patchId: 'patch-01', row: 0, col: 0 });
       assert.equal(missing.status, 400);
       assert.equal((await missing.json()).error, 'invalid-player');
 
-      const bogus = await placePiece(gameId, 0, 'not-a-real-player-id');
+      const bogus = await placePatch(gameId, { patchId: 'patch-01', row: 0, col: 0, playerId: 'not-a-real-player-id' });
       assert.equal(bogus.status, 400);
       assert.equal((await bogus.json()).error, 'invalid-player');
     });
@@ -254,13 +276,15 @@ test('legal actions and preview endpoints', async (t) => {
       const x = await join(gameId, tokenFor(invites, 'X')); // moves first
       const o = await join(gameId, tokenFor(invites, 'O'));
 
-      const outOfTurn = await placePiece(gameId, 0, o.playerId);
+      const outOfTurn = await placePatch(gameId, { patchId: 'patch-01', row: 0, col: 0, playerId: o.playerId });
       assert.equal(outOfTurn.status, 400);
       assert.equal((await outOfTurn.json()).error, 'not-your-turn');
 
-      const onTurn = await placePiece(gameId, 0, x.playerId);
+      const onTurn = await placePatch(gameId, { patchId: 'patch-01', row: 0, col: 0, playerId: x.playerId });
       assert.equal(onTurn.status, 200);
-      assert.equal((await onTurn.json()).state.board[0], 'X');
+      const onTurnBody = await onTurn.json();
+      assert.equal(onTurnBody.state.quiltBoards.X[0], 'patch-01');
+      assert.equal(onTurnBody.state.currentPlayer, 'O', 'turn passes to the other player');
     });
 
     await t.test('GET /actions is scoped to the requesting playerId', async () => {
@@ -268,14 +292,14 @@ test('legal actions and preview endpoints', async (t) => {
       const x = await join(gameId, tokenFor(invites, 'X'));
       const o = await join(gameId, tokenFor(invites, 'O')); // now in-progress, X's turn
 
-      const xView = await fetch(`${BASE}/api/games/${gameId}/actions?playerId=${x.playerId}`);
-      assert.equal((await xView.json()).actions.length, 1, "the player whose turn it is sees the real domain");
+      const xView = await fetchActions(gameId, { playerId: x.playerId });
+      assert.equal(xView.actions.length, 1, "the player whose turn it is sees the real domain");
 
-      const oView = await fetch(`${BASE}/api/games/${gameId}/actions?playerId=${o.playerId}`);
-      assert.deepEqual((await oView.json()).actions, [], "not this player's turn");
+      const oView = await fetchActions(gameId, { playerId: o.playerId });
+      assert.deepEqual(oView.actions, [], "not this player's turn");
 
-      const noPlayerView = await fetch(`${BASE}/api/games/${gameId}/actions`);
-      assert.deepEqual((await noPlayerView.json()).actions, [], 'no playerId at all is treated like a spectator');
+      const noPlayerView = await fetchActions(gameId);
+      assert.deepEqual(noPlayerView.actions, [], 'no playerId at all is treated like a spectator');
     });
   } finally {
     child.kill();

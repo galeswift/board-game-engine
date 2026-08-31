@@ -1,8 +1,12 @@
 import { useEffect, useRef, useState } from 'react';
-import Board from './components/Board.jsx';
+import QuiltBoard from './components/QuiltBoard.jsx';
+import PatchPicker from './components/PatchPicker.jsx';
+import RotateControl from './components/RotateControl.jsx';
 import LobbyStatus from './components/LobbyStatus.jsx';
 import InvitePanel from './components/InvitePanel.jsx';
 import Controls from './components/Controls.jsx';
+
+const SLOTS = ['X', 'O'];
 
 function inviteLinkFor(id, token) {
   const link = new URL(`${window.location.origin}${window.location.pathname}`);
@@ -11,6 +15,10 @@ function inviteLinkFor(id, token) {
   return link.toString();
 }
 
+// The turn-agnostic "what's pickable" query - no patch selected yet.
+// Same "Client Authority: Zero" pattern as before: the client never
+// decides whose turn it is, it reads that off whether this comes back
+// non-empty.
 async function fetchLegalActions(gameId, playerId) {
   const query = playerId ? `?playerId=${encodeURIComponent(playerId)}` : '';
   const res = await fetch(`/api/games/${gameId}/actions${query}`);
@@ -18,10 +26,18 @@ async function fetchLegalActions(gameId, playerId) {
   return data.actions || [];
 }
 
-// Claims (or reconnects to) whichever slot `inviteToken` belongs to.
-// Idempotent server-side: calling this again with the same token - a
-// fresh join or a reconnect after closing the tab - returns the same
-// playerId both times.
+// Once a patch (and rotation) is selected, ask the server for the
+// domain of legal anchors - the client never computes placement
+// legality itself (see engine.js's queryLegalActions).
+async function fetchPlacementDomain(gameId, playerId, patchId, rotation) {
+  const params = new URLSearchParams({ patchId, rotation: String(rotation) });
+  if (playerId) params.set('playerId', playerId);
+  const res = await fetch(`/api/games/${gameId}/actions?${params.toString()}`);
+  const data = await res.json();
+  const placement = (data.actions || []).find((a) => a.type === 'placePatch');
+  return placement ? placement.params.anchor.domain : [];
+}
+
 async function joinLobbyRequest(gameId, inviteToken) {
   const res = await fetch(`/api/games/${gameId}/join`, {
     method: 'POST',
@@ -39,23 +55,30 @@ export default function App() {
   const [mySlot, setMySlot] = useState(null);
   const [gameState, setGameState] = useState(null);
   const [legalActions, setLegalActions] = useState([]);
-  // { X: { claimed }, O: { claimed } } for multiplayer games - never
-  // contains tokens, just enough to render a player list.
   const [lobby, setLobby] = useState(null);
   const [inviteLink, setInviteLink] = useState('');
   const [shareLabel, setShareLabel] = useState('Copy Share Link');
   const [copyLabel, setCopyLabel] = useState('Copy Invite Link');
 
+  // Selection is purely local UI state - never sent anywhere until the
+  // player actually places the patch. Reset on every new state (a
+  // placement, a turn change pushed over the socket, a fresh load).
+  const [selectedPatchId, setSelectedPatchId] = useState(null);
+  const [rotation, setRotation] = useState(0);
+  const [placementDomain, setPlacementDomain] = useState([]);
+
   const initedRef = useRef(false);
-  // The invite link is the only credential for multiplayer identity - no
-  // localStorage, no accounts. A ref (not state) so the socket effect
-  // below can read the latest value at 'open' time without re-running
-  // every time it changes.
   const playerIdRef = useRef(null);
 
   function updatePlayerId(id) {
     playerIdRef.current = id;
     setPlayerId(id);
+  }
+
+  function clearSelection() {
+    setSelectedPatchId(null);
+    setRotation(0);
+    setPlacementDomain([]);
   }
 
   async function createGame(requestedMode) {
@@ -79,14 +102,12 @@ export default function App() {
     if (newMode === 'multiplayer') {
       const ownInvite = data.invites.find((i) => i.slot === 'X');
       const opponentInvite = data.invites.find((i) => i.slot === 'O');
-      const joined = await joinLobbyRequest(gid, ownInvite.token); // creator claims the first slot automatically
+      const joined = await joinLobbyRequest(gid, ownInvite.token);
       if (joined) {
         newPlayerId = joined.playerId;
         newSlot = joined.slot;
         newLobby = joined.lobby;
       }
-      // The creator's own address bar becomes their personal reconnect
-      // link - bookmarking it later needs no extra step.
       url.searchParams.set('invite', ownInvite.token);
       newInviteLink = inviteLinkFor(gid, opponentInvite.token);
     }
@@ -100,6 +121,7 @@ export default function App() {
     setGameState(data.state);
     setLobby(newLobby);
     setInviteLink(newInviteLink);
+    clearSelection();
     setLegalActions(await fetchLegalActions(gid, newPlayerId));
   }
 
@@ -119,7 +141,7 @@ export default function App() {
     let newLobby = data.lobby || null;
 
     if (newMode === 'multiplayer' && joinToken) {
-      const joined = await joinLobbyRequest(gid, joinToken); // first visit or a reconnect - same call either way
+      const joined = await joinLobbyRequest(gid, joinToken);
       if (joined) {
         newPlayerId = joined.playerId;
         newSlot = joined.slot;
@@ -135,11 +157,30 @@ export default function App() {
     setGameState(newGameState);
     setLobby(newLobby);
     setInviteLink('');
+    clearSelection();
     setLegalActions(await fetchLegalActions(gid, newPlayerId));
   }
 
-  async function placePiece(cell) {
-    const action = { type: 'placePiece', cell };
+  async function selectPatch(patchId) {
+    if (patchId === selectedPatchId) {
+      clearSelection();
+      return;
+    }
+    setSelectedPatchId(patchId);
+    setRotation(0);
+    setPlacementDomain(await fetchPlacementDomain(gameId, playerId, patchId, 0));
+  }
+
+  async function rotateSelected() {
+    if (!selectedPatchId) return;
+    const nextRotation = (rotation + 1) % 4;
+    setRotation(nextRotation);
+    setPlacementDomain(await fetchPlacementDomain(gameId, playerId, selectedPatchId, nextRotation));
+  }
+
+  async function placeSelectedPatch(row, col) {
+    if (!selectedPatchId) return;
+    const action = { type: 'placePatch', patchId: selectedPatchId, rotation, row, col };
     if (playerId) action.playerId = playerId;
     const res = await fetch(`/api/games/${gameId}/actions`, {
       method: 'POST',
@@ -149,6 +190,7 @@ export default function App() {
     const data = await res.json();
     if (data.state) {
       setGameState(data.state);
+      clearSelection();
       setLegalActions(await fetchLegalActions(gameId, playerId));
     }
   }
@@ -165,7 +207,6 @@ export default function App() {
     setTimeout(() => setCopyLabel('Copy Invite Link'), 1500);
   }
 
-  // Initial load: exactly once, mirroring client.js's bottom-of-file logic.
   useEffect(() => {
     if (initedRef.current) return;
     initedRef.current = true;
@@ -178,11 +219,6 @@ export default function App() {
     }
   }, []);
 
-  // Live push: lets the *other* player's browser find out a move happened
-  // without polling. Additive on top of the REST calls above, which
-  // remain the source of truth. One socket per game load - depends only
-  // on gameId (not playerId) so a batched playerId update right after
-  // gameId doesn't reopen it; playerIdRef carries the latest value in.
   useEffect(() => {
     if (!gameId) return;
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -198,9 +234,8 @@ export default function App() {
         setGameState(message.state);
         setLegalActions(message.actions || []);
         if (message.lobby) setLobby(message.lobby);
+        clearSelection(); // a new state (ours or the opponent's move) invalidates any in-flight selection
       }
-      // 'presence' messages are cosmetic-only and not wired into the UI
-      // yet - nothing in this phase depends on them.
     });
     return () => socket.close();
   }, [gameId]);
@@ -214,22 +249,49 @@ export default function App() {
     );
   }
 
+  const canAct = legalActions.some((a) => a.type === 'selectPatch');
+  const interactiveSlot = canAct ? gameState.currentPlayer : null;
+  const highlighted = new Set(placementDomain.map(([row, col]) => `${row},${col}`));
+
   const statusText = gameState.status === 'lobby'
     ? 'Waiting for another player to join… share the link!'
-    : gameState.status === 'won'
-      ? `${gameState.winner} wins!`
-      : gameState.status === 'draw'
-        ? "It's a draw."
-        : `${gameState.currentPlayer}'s turn`;
+    : gameState.status === 'complete'
+      ? 'All patches have been placed!'
+      : !canAct
+        ? "Waiting for the other player…"
+        : selectedPatchId
+          ? `Choose where to place ${selectedPatchId} on your board`
+          : "Your turn — pick a patch below";
 
   return (
-    <main>
+    <main className="patchwork-app">
       <h1>Patchwork</h1>
       <p id="status">{statusText}</p>
 
       <LobbyStatus mode={mode} lobby={lobby} mySlot={mySlot} gameState={gameState} />
 
-      <Board board={gameState.board} legalActions={legalActions} onCellClick={placePiece} />
+      <div className="quilt-boards">
+        {SLOTS.map((slot) => (
+          <QuiltBoard
+            key={slot}
+            slot={slot}
+            label={mode === 'multiplayer' ? (slot === mySlot ? 'Your board' : "Opponent's board") : `Player ${slot}`}
+            board={gameState.quiltBoards[slot]}
+            interactive={slot === interactiveSlot && !!selectedPatchId}
+            highlighted={highlighted}
+            onCellClick={placeSelectedPatch}
+          />
+        ))}
+      </div>
+
+      <RotateControl rotation={rotation} onRotate={rotateSelected} disabled={!selectedPatchId} />
+
+      <PatchPicker
+        availablePatches={gameState.availablePatches}
+        selectedPatchId={selectedPatchId}
+        onSelect={selectPatch}
+        disabled={!canAct}
+      />
 
       <Controls
         onNewLocal={() => createGame('local')}
@@ -239,11 +301,10 @@ export default function App() {
       />
 
       <p className="hint">Local: pass-and-play on one device. Multiplayer: share
-        the link so a second player can join from any device.</p>
+        the link so a second player can join from any device. Pick a patch,
+        rotate it if you like, then click a highlighted square on your own
+        board to place it.</p>
 
-      {/* The invite panel is only useful while still waiting for the
-          opponent - once they've joined, sharing it again would just hand
-          out someone else's seat. */}
       <InvitePanel
         visible={gameState.status === 'lobby' && !!inviteLink}
         inviteLink={inviteLink}

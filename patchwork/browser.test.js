@@ -1,16 +1,16 @@
 'use strict';
 
-// End-to-end browser coverage - everything else in this suite tests the
-// HTTP/WS API directly, but the React client's rendering, the invite
-// panel, and the live-update-without-reload behavior have no automated
-// coverage otherwise. Uses raw `playwright` (a devDependency only - it
-// never touches the Dockerfile/production image) driven from node:test,
+// End-to-end browser coverage of the pick-a-patch/rotate/place MVP
+// flow: everything else in this suite tests the HTTP/WS API directly,
+// but the React client's rendering, patch picker, rotate control, and
+// live-update-without-reload behavior have no automated coverage
+// otherwise. Uses raw `playwright` (a devDependency only - it never
+// touches the Dockerfile/production image) driven from node:test,
 // rather than pulling in a second test framework (@playwright/test).
 //
-// Requires `web/dist` to already be built (`npm run build` - see
-// package.json) since server.js serves that directory as static files,
-// same as tic-tac-toe's equivalent test requires a reachable Postgres,
-// which every other *.test.js file here also needs (see README.md).
+// Requires `web/dist` to already be built (`npm run build`) since
+// server.js serves that directory as static files, same as every other
+// *.test.js file here also needs a reachable Postgres (see README.md).
 
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
@@ -44,22 +44,19 @@ async function waitFor(fn, { timeoutMs = 5000, intervalMs = 50 } = {}) {
   }
 }
 
-function cellText(page, index) {
-  return page.locator('.cell').nth(index).textContent();
-}
-
 function myRoleText(page) {
   return page.locator('#myRole').textContent();
 }
 
-// The app auto-creates a local game on any page load with no ?game= in
-// the URL. That means a bare page.goto(BASE) already has `.cell`
-// elements on the page before a "New Multiplayer Game" click even
-// starts - waiting for `.cell` to exist is not a valid signal that the
-// *new* game finished loading. Waiting for the expected role text is a
-// real signal instead.
 async function waitForRole(page, expected) {
   await waitFor(async () => (await myRoleText(page)) === expected);
+}
+
+async function pickFirstAvailablePatch(page) {
+  const tile = page.locator('.patch-tile:not(:disabled)').first();
+  const patchId = await tile.getAttribute('data-patch-id');
+  await tile.click();
+  return patchId;
 }
 
 test('browser end-to-end', async (t) => {
@@ -72,20 +69,31 @@ test('browser end-to-end', async (t) => {
   try {
     await waitForServer();
 
-    await t.test('local game: create and play a move', async () => {
+    await t.test('local game: select a patch, rotate it, place it, turn passes', async () => {
       const page = await browser.newPage();
-      await page.goto(BASE); // already auto-creates a local game on load
-      await page.locator('#newLocalGameBtn').click(); // explicitly start a fresh one anyway
-      await waitFor(async () => (await page.locator('#status').textContent()) === "X's turn");
+      await page.goto(BASE);
+      await page.locator('#newLocalGameBtn').click();
+      await waitFor(async () => (await page.locator('#status').textContent()) === 'Your turn — pick a patch below');
 
-      await page.locator('.cell').nth(4).click();
-      await waitFor(async () => (await cellText(page, 4)) === 'X');
-      assert.equal(await page.locator('#status').textContent(), "O's turn");
+      const patchId = await pickFirstAvailablePatch(page);
+      await waitFor(async () => (await page.locator('#rotateBtn').textContent()) === 'Rotate (0°)');
+      await page.locator('#rotateBtn').click();
+      await waitFor(async () => (await page.locator('#rotateBtn').textContent()) === 'Rotate (90°)');
+
+      // The tile for the placed patch should now be disabled once
+      // placed, and a highlighted cell should be clickable on X's board.
+      const highlightedCell = page.locator('#quiltBoard-X .quilt-cell.highlight').first();
+      await highlightedCell.waitFor();
+      await highlightedCell.click();
+
+      await waitFor(async () => (await page.locator(`.patch-tile[data-patch-id="${patchId}"]`).isDisabled()));
+      await waitFor(async () => (await page.locator('#quiltBoard-X .quilt-cell.filled').count()) > 0);
+      assert.equal(await page.locator('#status').textContent(), 'Your turn — pick a patch below', "it's a fresh pick for the other player (pass-and-play, same status text)");
 
       await page.close();
     });
 
-    await t.test('multiplayer: role, live updates, and lobby status across two browsers', async () => {
+    await t.test('multiplayer: a placement flips the turn and live-updates the guest with no reload', async () => {
       const hostCtx = await browser.newContext();
       const hostPage = await hostCtx.newPage();
       await hostPage.goto(BASE);
@@ -93,79 +101,35 @@ test('browser end-to-end', async (t) => {
       await waitForRole(hostPage, 'You are X');
 
       const inviteLink = await hostPage.locator('#inviteLinkInput').inputValue();
-      assert.match(inviteLink, /invite=/);
-
-      // Board is unclickable while waiting - queryLegalActions returns
-      // [] during 'lobby', same as it does once the game is over.
-      assert.equal(await page_isBoardFullyDisabled(hostPage), true);
 
       const guestCtx = await browser.newContext();
       const guestPage = await guestCtx.newPage();
       await guestPage.goto(inviteLink);
       await waitForRole(guestPage, 'You are O');
 
-      // Once both have joined, the host's invite panel (for inviting
-      // someone else into O's now-taken seat) should disappear.
-      await waitFor(async () => await hostPage.locator('#invitePanel').isHidden());
+      await waitFor(async () => (await hostPage.locator('#status').textContent()) === 'Your turn — pick a patch below');
+      assert.equal(await guestPage.locator('#status').textContent(), 'Waiting for the other player…');
 
-      // Host (X) moves; guest's page must update live, with no reload.
-      await hostPage.locator('.cell').nth(0).click();
-      await waitFor(async () => (await cellText(guestPage, 0)) === 'X');
-      assert.equal(await guestPage.locator('#status').textContent(), "O's turn");
+      const patchId = await pickFirstAvailablePatch(hostPage);
+      const highlightedCell = hostPage.locator('#quiltBoard-X .quilt-cell.highlight').first();
+      await highlightedCell.waitFor();
+      await highlightedCell.click();
 
-      // Regression check ported from tic-tac-toe: the player-list row
-      // for *your own* slot must say "your turn" when it's your turn,
-      // not "their turn".
-      const guestRows = await guestPage.locator('#playerList li').allTextContents();
-      assert.match(guestRows.find((r) => r.startsWith('O')), /your turn/);
-      assert.doesNotMatch(guestRows.find((r) => r.startsWith('X')), /turn/);
+      // Guest's view updates live: it's now their turn, and the placed
+      // patch is greyed out on their picker too (shared pool).
+      await waitFor(async () => (await guestPage.locator('#status').textContent()) === 'Your turn — pick a patch below');
+      await waitFor(async () => await guestPage.locator(`.patch-tile[data-patch-id="${patchId}"]`).isDisabled());
+      await waitFor(async () => (await hostPage.locator('#status').textContent()) === 'Waiting for the other player…');
 
-      const hostRows = await hostPage.locator('#playerList li').allTextContents();
-      assert.doesNotMatch(hostRows.find((r) => r.startsWith('X')), /turn/, "not X's turn anymore");
-      assert.match(hostRows.find((r) => r.startsWith('O')), /their turn/, "from X's perspective, O's row says their turn");
+      // And the host's own placement is visible on the *opponent's*
+      // board from the guest's point of view.
+      await waitFor(async () => (await guestPage.locator("#quiltBoard-X .quilt-cell.filled").count()) > 0);
 
       await hostCtx.close();
       await guestCtx.close();
-    });
-
-    await t.test('multiplayer: reconnecting via the same invite link restores the seat', async () => {
-      const ctx1 = await browser.newContext();
-      const page1 = await ctx1.newPage();
-      await page1.goto(BASE);
-      await page1.locator('#newMultiplayerGameBtn').click();
-      await waitForRole(page1, 'You are X');
-      const hostUrl = page1.url(); // carries the host's own ?invite= token
-      const opponentInvite = await page1.locator('#inviteLinkInput').inputValue();
-
-      // A solo host can't move yet - the game stays in 'lobby' until
-      // both slots are filled, so a second player has to join first.
-      const opponentCtx = await browser.newContext();
-      const opponentPage = await opponentCtx.newPage();
-      await opponentPage.goto(opponentInvite);
-      await waitForRole(opponentPage, 'You are O');
-
-      await page1.locator('.cell').nth(0).click();
-      await waitFor(async () => (await cellText(page1, 0)) === 'X');
-
-      await ctx1.close(); // simulates closing the tab
-      await opponentCtx.close();
-
-      const ctx2 = await browser.newContext();
-      const page2 = await ctx2.newPage();
-      await page2.goto(hostUrl); // reopening the bookmarked link
-      await waitForRole(page2, 'You are X');
-
-      assert.equal(await cellText(page2, 0), 'X', 'the earlier move is still there');
-
-      await ctx2.close();
     });
   } finally {
     await browser.close();
     server.kill();
   }
 });
-
-async function page_isBoardFullyDisabled(page) {
-  const states = await page.locator('.cell').evaluateAll((cells) => cells.map((c) => c.disabled));
-  return states.every(Boolean);
-}

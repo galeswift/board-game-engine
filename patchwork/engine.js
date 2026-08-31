@@ -1,34 +1,36 @@
 'use strict';
 
-// Placeholder engine: this is deliberately just tic-tac-toe's rules,
-// copied as-is (now including its lobby/mode plumbing, ported alongside
-// server.js's async-multiplayer support), so patchwork/ has a real
-// deployable folder with the same server.js/engine.js split before any
-// actual Patchwork rules exist. See docs/architecture.md Section 12 for
-// the real design (asymmetric turn order, per-player economy, phase
-// transitions) this will be replaced with. Don't build on top of this
-// logic - it's scaffolding, not a starting point for Patchwork's rules.
+// First real slice of Patchwork's rules (see docs/patchwork-next-steps.md):
+// pick a patch from a shared pool, rotate it, place it on your own 9x9
+// quilt board. Deliberately minimal - no cost, no time track, no button
+// economy, no scoring, no win condition. Only legality check is
+// geometric: fits the grid, doesn't overlap what's already placed.
+//
+// Still a small direct-mutation engine (pure (state, action) -> {state,
+// error} functions), not the full command/event/phase pipeline from
+// docs/architecture.md - same reasoning tic-tac-toe never adopted it
+// either (see the status note at the top of that doc).
 
-const WIN_LINES = [
-  [0, 1, 2], [3, 4, 5], [6, 7, 8], // rows
-  [0, 3, 6], [1, 4, 7], [2, 5, 8], // columns
-  [0, 4, 8], [2, 4, 6],            // diagonals
-];
+const { PATCHES, getPatch, rotatePatch } = require('./patches');
+
+const BOARD_SIZE = 9;
+
+function emptyBoard() {
+  return Array(BOARD_SIZE * BOARD_SIZE).fill(null);
+}
 
 function createGame({ mode = 'local' } = {}) {
   return {
-    board: Array(9).fill(null),
+    quiltBoards: { X: emptyBoard(), O: emptyBoard() },
+    availablePatches: PATCHES.map((p) => p.id),
     currentPlayer: 'X',
-    winner: null,
-    // 'lobby' | 'in-progress' | 'won' | 'draw'. Multiplayer games start
-    // in 'lobby' until both slots are claimed (server.js); local games
-    // (pass-and-play, one device) have no lobby to wait on.
+    // 'lobby' | 'in-progress' | 'complete'. 'complete' once every patch
+    // has been placed - no winner/scoring here, just nothing left to do.
     status: mode === 'multiplayer' ? 'lobby' : 'in-progress',
   };
 }
 
-// Pure function: state -> state. 'lobby' -> 'in-progress', once whoever
-// is filling slots (server.js) decides the lobby is full. A no-op
+// Pure function: state -> state. 'lobby' -> 'in-progress'. A no-op
 // outside 'lobby' so callers don't need to guard the call site.
 function startGame(state) {
   if (state.status !== 'lobby') {
@@ -37,33 +39,57 @@ function startGame(state) {
   return { ...state, status: 'in-progress' };
 }
 
-function checkWinner(board) {
-  for (const [a, b, c] of WIN_LINES) {
-    if (board[a] && board[a] === board[b] && board[a] === board[c]) {
-      return board[a];
-    }
-  }
-  return null;
+// True if every cell of `shape` (already rotated) fits inside the board
+// anchored at (row, col) without overlapping an occupied cell. Bounds
+// are checked by the caller (row/col + shape.rows/cols <= BOARD_SIZE);
+// this only checks occupancy.
+function fits(board, shape, row, col) {
+  return shape.cells.every(([dr, dc]) => board[(row + dr) * BOARD_SIZE + (col + dc)] === null);
 }
 
-// Pure function: state -> Action[]. Each entry names an action type and
-// the domain of legal values for each of its parameters, so a client can
-// render enabled/disabled affordances (or a preview) without evaluating
-// legality itself - it only ever reads this list, never state.board
-// directly, to decide what's clickable.
-function queryLegalActions(state) {
+function placementDomain(board, shape) {
+  const domain = [];
+  for (let row = 0; row + shape.rows <= BOARD_SIZE; row++) {
+    for (let col = 0; col + shape.cols <= BOARD_SIZE; col++) {
+      if (fits(board, shape, row, col)) domain.push([row, col]);
+    }
+  }
+  return domain;
+}
+
+// Pure function: state -> Action[]. Same "Client Authority: Zero"
+// pattern as before, extended with an optional `selection` (which
+// patch/rotation the client currently has picked, if any) - the client
+// never computes placement legality itself, it asks for the domain
+// once it knows which patch it wants to try.
+//
+// Always checks against quiltBoards[state.currentPlayer] - server.js's
+// scopedActions already returns [] to anyone who isn't the current
+// player, so only the current player's own board is ever a legitimate
+// query target here.
+function queryLegalActions(state, { patchId, rotation } = {}) {
   if (state.status !== 'in-progress') {
     return [];
   }
-  const domain = state.board.reduce((cells, cell, index) => {
-    if (cell === null) cells.push(index);
-    return cells;
-  }, []);
-  return [{ type: 'placePiece', params: { cell: { domain } } }];
+  if (patchId == null) {
+    return [{ type: 'selectPatch', params: { patchId: { domain: state.availablePatches.slice() } } }];
+  }
+  if (!state.availablePatches.includes(patchId)) {
+    return [];
+  }
+  const patch = getPatch(patchId);
+  if (!patch) return [];
+  const rot = ((Number(rotation) || 0) % 4 + 4) % 4;
+  const shape = rotatePatch(patch, rot);
+  const board = state.quiltBoards[state.currentPlayer];
+  const domain = placementDomain(board, shape);
+  return [{ type: 'placePatch', params: { patchId, rotation: rot, anchor: { domain } } }];
 }
 
 // Pure function: (state, action) -> { state, error }
-// Never mutates the input state.
+// Never mutates the input state. Re-derives the same fit check
+// queryLegalActions would report - never trusts the client's own
+// rotation/anchor math.
 function applyAction(state, action) {
   if (state.status === 'lobby') {
     return { state, error: 'lobby-not-started' };
@@ -71,29 +97,46 @@ function applyAction(state, action) {
   if (state.status !== 'in-progress') {
     return { state, error: 'game-over' };
   }
-  if (!action || action.type !== 'placePiece') {
+  if (!action || action.type !== 'placePatch') {
     return { state, error: 'unknown-action' };
   }
 
-  const { cell } = action;
-  if (typeof cell !== 'number' || cell < 0 || cell > 8 || !Number.isInteger(cell)) {
-    return { state, error: 'invalid-cell' };
+  const { patchId, row, col } = action;
+  if (typeof patchId !== 'string' || !state.availablePatches.includes(patchId)) {
+    return { state, error: 'invalid-patch' };
   }
-  if (state.board[cell] !== null) {
-    return { state, error: 'occupied' };
+  const patch = getPatch(patchId);
+  if (!patch) {
+    return { state, error: 'invalid-patch' };
+  }
+  if (!Number.isInteger(row) || !Number.isInteger(col)) {
+    return { state, error: 'invalid-placement' };
   }
 
-  const board = state.board.slice();
-  board[cell] = state.currentPlayer;
+  const rotation = ((Number(action.rotation) || 0) % 4 + 4) % 4;
+  const shape = rotatePatch(patch, rotation);
+  if (row < 0 || col < 0 || row + shape.rows > BOARD_SIZE || col + shape.cols > BOARD_SIZE) {
+    return { state, error: 'invalid-placement' };
+  }
 
-  const winner = checkWinner(board);
-  const isDraw = !winner && board.every((c) => c !== null);
+  const board = state.quiltBoards[state.currentPlayer];
+  if (!fits(board, shape, row, col)) {
+    return { state, error: 'invalid-placement' };
+  }
+
+  const nextBoard = board.slice();
+  for (const [dr, dc] of shape.cells) {
+    nextBoard[(row + dr) * BOARD_SIZE + (col + dc)] = patchId;
+  }
+
+  const availablePatches = state.availablePatches.filter((id) => id !== patchId);
+  const nextPlayer = state.currentPlayer === 'X' ? 'O' : 'X';
 
   const nextState = {
-    board,
-    currentPlayer: state.currentPlayer === 'X' ? 'O' : 'X',
-    winner: winner || null,
-    status: winner ? 'won' : isDraw ? 'draw' : 'in-progress',
+    quiltBoards: { ...state.quiltBoards, [state.currentPlayer]: nextBoard },
+    availablePatches,
+    currentPlayer: nextPlayer,
+    status: availablePatches.length === 0 ? 'complete' : 'in-progress',
   };
 
   return { state: nextState, error: null };

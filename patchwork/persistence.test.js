@@ -53,7 +53,7 @@ test('game state survives a server restart', async () => {
     await fetch(`${BASE}/api/games/${gameId}/actions`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ type: 'placePiece', cell: 4 }),
+      body: JSON.stringify({ type: 'placePatch', patchId: 'patch-01', rotation: 0, row: 0, col: 0 }),
     });
 
     child.kill();
@@ -65,7 +65,7 @@ test('game state survives a server restart', async () => {
     const res = await fetch(`${BASE}/api/games/${gameId}`);
     assert.equal(res.status, 200, 'the game is still there after the process restarted');
     const { state } = await res.json();
-    assert.equal(state.board[4], 'X', 'the move made before the restart is still there');
+    assert.equal(state.quiltBoards.X[0], 'patch-01', 'the move made before the restart is still there');
   } finally {
     child.kill();
   }
