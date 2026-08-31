@@ -98,7 +98,9 @@ function renderLobbyStatus() {
     const label = document.createElement('span');
     label.textContent = slot + (slot === mySlot ? ' (you)' : '');
     const detail = document.createElement('span');
-    detail.textContent = !claimed ? 'waiting…' : isTurn ? "their turn" : 'joined';
+    detail.textContent = !claimed
+      ? 'waiting…'
+      : isTurn ? (slot === mySlot ? 'your turn' : 'their turn') : 'joined';
 
     li.append(label, detail);
     li.classList.toggle('is-you', slot === mySlot);

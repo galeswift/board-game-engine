@@ -25,11 +25,17 @@ something else.
 
 ```
 docker compose up -d   # the test suite needs the same reachable Postgres
+npm install             # first time only - also downloads Playwright's Chromium
 npm test
 ```
 
 Every `*.test.js` file spawns its own real server process against that
 same database - there's no mocking of the HTTP layer or the DB.
+`browser.test.js` goes one step further and drives an actual Chromium
+instance via Playwright (a devDependency only - it never touches the
+Dockerfile or the deployed image) to cover `client.js`'s rendering and
+live-update behavior, which the other test files can't reach since they
+only exercise the HTTP/WS API directly.
 
 ## Environment variables
 
