@@ -1,14 +1,22 @@
 {
   "name": "patchwork",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
-  "description": "Placeholder for the second board-game-engine prototype (currently tic-tac-toe's rules, cloned).",
+  "description": "Patchwork prototype: tic-tac-toe's rules cloned onto tic-tac-toe's async-multiplayer backend (lobby/WS/Postgres), real Patchwork rules not yet built.",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
+    "build": "npm --prefix web run build",
     "test": "node --test"
   },
   "engines": {
     "node": ">=18"
+  },
+  "dependencies": {
+    "pg": "^8.23.0",
+    "ws": "^8.21.3"
+  },
+  "devDependencies": {
+    "playwright": "^1.62.1"
   }
 }

@@ -132,62 +132,61 @@ instead of prototyped in vanilla JS and then rewritten.
     is no live `patchwork/` frontend to wire it into until #1 and #3
     are done. Do that wiring as part of #3, not before.
 
+### Done (this session)
+- **#1 — duplicate tic-tac-toe's backend into `patchwork/`.** Ported:
+  `engine.js` (mode/lobby/`startGame`), `server.js` (full route set,
+  lobby/identity helpers, WS channel, upgrade handler, fail-fast
+  startup), `db.js` (including the `42P07`/`23505` race fix, pointed at
+  its own `patchwork` database), `docker-compose.yml` (`patchwork` db,
+  host port `5433` so it can run alongside tic-tac-toe's), `Dockerfile`,
+  and `package.json` (`ws`/`pg` deps, `playwright` devDependency). Tests
+  ported: `engine.test.js`, `server.test.js`, `socket.test.js`,
+  `persistence.test.js`, on a distinct port range (`356xx`) from
+  tic-tac-toe's. All passing (47 tests). `engine.js` is still
+  tic-tac-toe's rules, deliberately - see "Keep as-is" below, unchanged
+  from the original plan.
+
+- **#2 — Railway deployment.** `patchwork/README.md` now has the
+  dashboard-click "Railway setup: attaching Postgres" section, mirroring
+  tic-tac-toe's, naming `patchwork`'s own separate Postgres plugin.
+  **Actually creating the Railway service/database is still the user's
+  step** - not done by this session, per the original plan below.
+
+- **#3 — Vite + React conversion.** Done: `patchwork/web/` is a new Vite
+  React app (its own `package.json`, kept separate from the server's so
+  React/Vite deps never enter the server's production Dockerfile stage).
+  Components: `App`, `Board`, `LobbyStatus`, `InvitePanel`, `Controls` -
+  a like-for-like port of the old vanilla-JS client's behavior (create
+  local/multiplayer, join-by-invite-token, `?game=&invite=` URL params,
+  WS live push, "Client Authority: Zero" legal-actions scoping), same
+  dark theme, same element ids/classes (so the ported `browser.test.js`
+  needed only a port-number change). Old `patchwork/public/` (vanilla-JS
+  client) deleted - fully superseded. `server.js`'s `PUBLIC_DIR` now
+  points at `web/dist`. `Dockerfile` is multi-stage: stage 1 builds
+  `web/` with `npm ci && npm run build`, stage 2 copies that `dist/`
+  output alongside the server's own `npm install --omit=dev`. Root
+  `package.json` gained a `build` script (`npm --prefix web run build`).
+  `browser.test.js` ported and passing against the real React build (4
+  tests, including the turn-label regression check from tic-tac-toe's
+  version).
+
+  **Not in scope, as planned**: no real Patchwork board/patches/market
+  UI - the engine is still tic-tac-toe's rules, that's later, separate
+  work. The image-plugin convention from #5 stays unwired - no patch art
+  to plug in until the real engine and its UI exist.
+
 ### Not started
-- **#1 — duplicate tic-tac-toe's backend into `patchwork/`.**
-  `patchwork/` is currently frozen at tic-tac-toe's *very first* state
-  (see `patchwork/README.md` — "structural clone... same rules...
-  don't treat `patchwork/engine.js` as a starting point"). None of this
-  session's multiplayer work has been ported. Concretely, port:
-  - `server.js` — the full route set (create/join/actions/actions
-    preview/GET), the `lobbySummary`/`scopedActions`/`slotForPlayerId`/
-    `slotForToken` helpers, the WebSocket live channel
-    (`socketsByGame`, `broadcastState`, `broadcastPresence`, the
-    `/api/games/:id/socket` upgrade handler).
-  - `db.js` — Postgres persistence layer (`ensureSchema`, `insertGame`,
-    `getGame`, `saveGame`), **including** the `ensureSchema` fix for
-    the concurrent-first-`CREATE TABLE IF NOT EXISTS` race (catches
-    Postgres error codes `42P07` and `23505` — this was a real bug
-    found and fixed during testing, don't lose it on a naive re-copy).
-  - `docker-compose.yml` — local Postgres for dev/test, on its own port
-    if run alongside tic-tac-toe's (or just don't run both at once).
-  - `package.json` — add `ws` and `pg` as real dependencies, `playwright`
-    as a devDependency; keep `Dockerfile`'s `npm install --omit=dev`
-    step (already present from patchwork's initial scaffold).
-  - The test suite: `engine.test.js`, `server.test.js`, `socket.test.js`,
-    `persistence.test.js`, `browser.test.js` — port and adapt (new
-    ports, since patchwork will run on a different port than
-    tic-tac-toe's tests; e.g. tic-tac-toe uses 34599/34899/34905/34906
-    for its various test files — pick a distinct range for patchwork so
-    the two projects' test suites could theoretically run concurrently
-    without port collisions, though they're separate folders/processes
-    either way).
-  - **Deliberately skip**: `public/client.js`, `public/index.html`,
-    `public/style.css`. Porting the vanilla-JS client just to replace
-    it in step #3 is wasted work — go straight to React for the
-    frontend.
-  - **Keep as-is**: `engine.js` stays the tic-tac-toe-rules placeholder
-    for now (still "bootstrap-only, expected to be replaced wholesale"
-    per `CLAUDE.md`) — parity here is about the *backend plumbing*
-    (lobby/identity/WS/persistence), not the game rules, which is a
-    separate, later effort (the real Patchwork engine: asymmetric
-    turn order, per-player economy, phase transitions — see
-    `docs/architecture.md` Section 12).
-
-- **#2 — Railway deployment.** User's responsibility. Needs its own
-  Postgres plugin, separate from tic-tac-toe's (same reasoning as why
-  they're separate Railway services at all — independent lifecycles).
-  Mirror `tic-tac-toe/README.md`'s "Railway setup: attaching Postgres"
-  section (dashboard-click steps, not CLI — that was a deliberate
-  choice made this session, the user prefers being walked through UI
-  clicks over pasting CLI commands).
-
-- **#3 — Vite + React conversion.** Not started. Recommendation from
-  this session: Vite (not Create React App — lighter, faster, minimal
-  config), producing a static `dist/` build that the existing Node
-  `http` server can keep serving as-is (point `PUBLIC_DIR` at `dist/`
-  instead of `public/` — no need to run Vite's own server in
-  production, no change to the one-process deploy model). Natural
-  component boundaries for the real Patchwork UI: quilt board, patch
+- **#2, the actual Railway click-through.** The README section is
+  written (see "Done" above); creating the `patchwork` Railway service
+  and its Postgres plugin in the dashboard is still an outstanding
+  manual step for the user.
+- **The real Patchwork engine and UI.** Asymmetric, time-track-driven
+  turn order, per-player economy (buttons, quilt board), phase
+  transitions (setup → play → scoring → game over) — see
+  `docs/architecture.md` Section 12. This replaces `engine.js` wholesale
+  and is where the #5 image-plugin convention (`<PatchArt id>` in
+  `web/src/`) finally gets wired in, once there's a real quilt-piece UI
+  to plug it into. Natural component boundaries: quilt board, patch
   piece, market, time track, player stats panel.
 
 ## Key decisions/constraints to carry forward

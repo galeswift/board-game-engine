@@ -1,0 +1,19 @@
+{
+  "name": "patchwork-web",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Vite/React frontend for patchwork/ - a like-for-like port of the old vanilla-JS client's behavior (see docs/patchwork-next-steps.md, step #3). Kept as its own npm project so React/Vite deps never enter the server's production Dockerfile stage.",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build"
+  },
+  "dependencies": {
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^4.3.4",
+    "vite": "^5.4.11"
+  }
+}

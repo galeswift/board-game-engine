@@ -1,12 +1,13 @@
 'use strict';
 
 // Placeholder engine: this is deliberately just tic-tac-toe's rules,
-// copied as-is, so patchwork/ has a real deployable folder with the same
-// server.js/engine.js split before any actual Patchwork rules exist. See
-// docs/architecture.md Section 12 for the real design (asymmetric turn
-// order, per-player economy, phase transitions) this will be replaced
-// with. Don't build on top of this logic - it's scaffolding, not a
-// starting point for Patchwork's rules.
+// copied as-is (now including its lobby/mode plumbing, ported alongside
+// server.js's async-multiplayer support), so patchwork/ has a real
+// deployable folder with the same server.js/engine.js split before any
+// actual Patchwork rules exist. See docs/architecture.md Section 12 for
+// the real design (asymmetric turn order, per-player economy, phase
+// transitions) this will be replaced with. Don't build on top of this
+// logic - it's scaffolding, not a starting point for Patchwork's rules.
 
 const WIN_LINES = [
   [0, 1, 2], [3, 4, 5], [6, 7, 8], // rows
@@ -14,13 +15,26 @@ const WIN_LINES = [
   [0, 4, 8], [2, 4, 6],            // diagonals
 ];
 
-function createGame() {
+function createGame({ mode = 'local' } = {}) {
   return {
     board: Array(9).fill(null),
     currentPlayer: 'X',
     winner: null,
-    status: 'in-progress', // 'in-progress' | 'won' | 'draw'
+    // 'lobby' | 'in-progress' | 'won' | 'draw'. Multiplayer games start
+    // in 'lobby' until both slots are claimed (server.js); local games
+    // (pass-and-play, one device) have no lobby to wait on.
+    status: mode === 'multiplayer' ? 'lobby' : 'in-progress',
   };
+}
+
+// Pure function: state -> state. 'lobby' -> 'in-progress', once whoever
+// is filling slots (server.js) decides the lobby is full. A no-op
+// outside 'lobby' so callers don't need to guard the call site.
+function startGame(state) {
+  if (state.status !== 'lobby') {
+    return state;
+  }
+  return { ...state, status: 'in-progress' };
 }
 
 function checkWinner(board) {
@@ -51,6 +65,9 @@ function queryLegalActions(state) {
 // Pure function: (state, action) -> { state, error }
 // Never mutates the input state.
 function applyAction(state, action) {
+  if (state.status === 'lobby') {
+    return { state, error: 'lobby-not-started' };
+  }
   if (state.status !== 'in-progress') {
     return { state, error: 'game-over' };
   }
@@ -82,4 +99,4 @@ function applyAction(state, action) {
   return { state: nextState, error: null };
 }
 
-module.exports = { createGame, applyAction, queryLegalActions };
+module.exports = { createGame, applyAction, queryLegalActions, startGame };

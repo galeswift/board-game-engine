@@ -1,42 +1,101 @@
-# Patchwork (scaffold)
+# Patchwork
 
-This folder currently runs **tic-tac-toe's rules, copied as-is** — same
-`server.js`/`engine.js` split, same HTTP API, same game — so there's a
-real, independently deployable folder in place before any actual
-Patchwork rules exist. Nothing in `engine.js` here reflects Patchwork;
-don't build on top of it.
+Second board-game-engine prototype. Backend plumbing (async lobbies,
+per-slot invite links, a WebSocket live channel, Postgres persistence)
+is now at parity with `tic-tac-toe/`'s — ported wholesale, see
+[`docs/patchwork-next-steps.md`](../docs/patchwork-next-steps.md) for the
+full status. **The rules underneath are still tic-tac-toe's rules,
+copied as-is** — `engine.js` here is scaffolding, not real Patchwork;
+don't build on top of it. See
+[`docs/architecture.md`](../docs/architecture.md) Section 12 for the real
+design (asymmetric, time-track-driven turn order and per-player economy)
+this will eventually be replaced with.
 
-The real second prototype (per [`docs/architecture.md`](../docs/architecture.md)
-Section 12) will stress-test the rules engine's handling of:
-
-- Non-alternating, time-track-driven turn order
-- Individually-addressed, per-player economy (buttons, quilt board)
-- Phase transitions (setup → play → scoring → game over)
-
-Building that out means replacing `engine.js` wholesale (and extending
-`server.js`/the client as the state shape and action set change) — see
-the root [README](../README.md) and `CLAUDE.md` for project context.
-
-`tic-tac-toe/` has since grown async multiplayer, a WebSocket live
-channel, and Postgres-backed persistence (see its own README). None of
-that exists here yet — this scaffold is still the plain, zero-dependency,
-in-memory version. If/when Patchwork needs any of that, `tic-tac-toe/`'s
-implementation (and its README's Railway Postgres setup steps) is the
-pattern to reuse, pointed at a `patchwork` service with its own separate
-database.
+The frontend is a Vite/React app in [`web/`](web/) — a like-for-like
+port of the old vanilla-JS client's behavior (create local/multiplayer
+games, join by invite link, live board updates), not a Patchwork UI yet.
+Kept as its own npm project so React/Vite dependencies never enter the
+server's own `package.json` or its Dockerfile's production stage.
 
 ## Running locally
 
+Requires a reachable Postgres - the server persists lobby/game state
+there and fails fast on startup if it can't connect (see `db.js`).
+
 ```
-cd patchwork
-node server.js
+docker compose up -d   # starts a local Postgres on localhost:5433
+npm install
+npm run build           # builds web/ into web/dist, which server.js serves
+npm start
 ```
 
-Then open `http://localhost:3000`.
+Then open `http://localhost:3000`. `DATABASE_URL` defaults to
+`postgres://postgres:postgres@localhost:5433/patchwork` (matching
+`docker-compose.yml` - host port `5433`, not tic-tac-toe's `5432`, so
+both projects' local Postgres containers can run at the same time) if
+unset - only override it if you're pointing at something else.
+
+To iterate on the frontend with hot reload instead of a full rebuild,
+run `npm --prefix web run dev` in a second terminal (Vite's dev server
+proxies nothing on its own - point it at a running `npm start` backend,
+or just rebuild with `npm run build` after each change for now).
 
 ## Testing
 
 ```
-cd patchwork
+docker compose up -d   # the test suite needs the same reachable Postgres
+npm install             # first time only - also downloads Playwright's Chromium
+npm run build           # browser.test.js needs a real web/dist to serve
 npm test
 ```
+
+Every `*.test.js` file spawns its own real server process against that
+same database - there's no mocking of the HTTP layer or the DB.
+`browser.test.js` drives an actual Chromium instance via Playwright (a
+devDependency only - it never touches the Dockerfile or the deployed
+image) to cover the React client's rendering and live-update behavior,
+which the other test files can't reach since they only exercise the
+HTTP/WS API directly.
+
+## Environment variables
+
+- `PORT` - defaults to `3000`.
+- `DATABASE_URL` - Postgres connection string. For local dev it defaults
+  to the `docker-compose.yml` database; on Railway it must be set
+  explicitly (see below).
+
+## Railway setup: attaching Postgres
+
+This is a **one-time step per Railway environment**, not something to
+redo on every deploy - once `DATABASE_URL` is set on the service it
+persists across every future push automatically. If it's ever missing
+(a fresh environment, a recreated project), the server fails fast on
+startup and shows up as a failed deployment in Railway's dashboard - it
+can't silently ship broken, so there's no risk of not noticing.
+
+`patchwork` needs its **own** Postgres plugin, separate from
+tic-tac-toe's - same reasoning as why each game folder is an
+independent Railway service with its own lifecycle (see the root
+`CLAUDE.md`).
+
+Via the Railway dashboard:
+
+1. Open the `board-game-engine` project and click **New** → **Database**
+   → **Add PostgreSQL**. This provisions a *second* Postgres service in
+   the project (tic-tac-toe's Postgres service should already exist from
+   its own setup - don't reuse it here).
+2. Open the new Postgres service, go to its **Variables** (or
+   **Connect**) tab, and copy its connection string (usually shown as
+   `DATABASE_URL` or `DATABASE_PUBLIC_URL`).
+3. Open the `patchwork` service's **Variables** tab (create the service
+   first via **New** → **GitHub Repo**, pointing its **Root Directory**
+   setting at `patchwork/`, if it doesn't exist yet), add a new variable
+   named `DATABASE_URL`, and paste that connection string in (Railway may
+   also offer a "reference another service's variable" option here
+   instead of pasting a static value - either works).
+4. Redeploy the `patchwork` service if it doesn't happen automatically
+   after saving the variable.
+
+Railway intentionally doesn't auto-provision billed infrastructure just
+from a git push - attaching a database has to be a deliberate step you
+take once in the dashboard.

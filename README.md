@@ -7,16 +7,18 @@ Prototypes for a board game rules engine, one folder per game:
   per-slot invite links, a WebSocket live channel) with state persisted
   in Postgres. See [`tic-tac-toe/README.md`](tic-tac-toe/README.md) for
   local setup.
-- **`patchwork/`** — scaffold only, deployable now: a structural clone of
-  early tic-tac-toe (same server/engine split, same rules) standing in
-  until real Patchwork rules are built.
+- **`patchwork/`** — deployable now, backend at parity with
+  tic-tac-toe's (async multiplayer, WebSocket live channel, Postgres
+  persistence) and a Vite/React frontend, but still running
+  tic-tac-toe's *rules* underneath — real Patchwork rules aren't built
+  yet. See [`patchwork/README.md`](patchwork/README.md) for local setup.
 - **`forbidden-island/`** — not yet implemented.
 
 Each folder is self-contained and deployable independently — no shared
-package, no shared build step across folders. `tic-tac-toe/` has since
-grown two real dependencies (`ws`, `pg`) and a Postgres requirement of
-its own; `patchwork/` and `forbidden-island/` remain zero-dependency
-until they have a reason not to be.
+package, no shared build step across folders. `tic-tac-toe/` and
+`patchwork/` each carry their own `ws`/`pg` dependencies and their own
+Postgres requirement, never shared between them; `forbidden-island/`
+remains zero-dependency until it has a reason not to be.
 
 ## Project docs
 
@@ -63,7 +65,10 @@ this particular service should build:
 To deploy `patchwork/` (or `forbidden-island/` once it exists), repeat
 step 2–3 as a **second Railway service** in the same project, pointing
 its Root Directory at that folder — each prototype gets its own URL and
-deploy lifecycle, independent of the others.
+deploy lifecycle, independent of the others. `patchwork/` also needs its
+own Postgres plugin, same as step 4 above but separate from
+tic-tac-toe's — see [`patchwork/README.md`](patchwork/README.md)'s
+"Railway setup: attaching Postgres" section for the dashboard steps.
 
 ## Pushing this repo to GitHub for the first time
 

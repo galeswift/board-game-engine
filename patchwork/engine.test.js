@@ -2,7 +2,7 @@
 
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
-const { createGame, applyAction, queryLegalActions } = require('./engine');
+const { createGame, applyAction, queryLegalActions, startGame } = require('./engine');
 
 test('createGame returns a fresh, empty board', () => {
   const state = createGame();
@@ -92,4 +92,42 @@ test('queryLegalActions returns no actions once the game is a draw', () => {
     state = applyAction(state, { type: 'placePiece', cell }).state;
   }
   assert.deepEqual(queryLegalActions(state), []);
+});
+
+test('createGame defaults to local mode, starting in-progress immediately', () => {
+  assert.equal(createGame().status, 'in-progress');
+  assert.equal(createGame({ mode: 'local' }).status, 'in-progress');
+});
+
+test('createGame in multiplayer mode starts in the lobby', () => {
+  const state = createGame({ mode: 'multiplayer' });
+  assert.equal(state.status, 'lobby');
+  assert.deepEqual(state.board, Array(9).fill(null));
+  assert.equal(state.currentPlayer, 'X');
+});
+
+test('applyAction rejects a move while still in the lobby', () => {
+  const state = createGame({ mode: 'multiplayer' });
+  const result = applyAction(state, { type: 'placePiece', cell: 0 });
+  assert.equal(result.error, 'lobby-not-started');
+  assert.equal(result.state, state, 'rejected action returns the unchanged state');
+});
+
+test('queryLegalActions returns no actions while still in the lobby', () => {
+  const state = createGame({ mode: 'multiplayer' });
+  assert.deepEqual(queryLegalActions(state), []);
+});
+
+test('startGame transitions the lobby into an in-progress game', () => {
+  const state = createGame({ mode: 'multiplayer' });
+  const started = startGame(state);
+  assert.equal(started.status, 'in-progress');
+  assert.equal(started.currentPlayer, 'X');
+  assert.deepEqual(started.board, Array(9).fill(null));
+  assert.equal(state.status, 'lobby', 'startGame must not mutate the input state');
+});
+
+test('startGame is a no-op outside the lobby', () => {
+  const state = createGame(); // local, already in-progress
+  assert.equal(startGame(state), state);
 });

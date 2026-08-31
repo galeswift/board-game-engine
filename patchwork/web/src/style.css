@@ -83,3 +83,71 @@ button:active {
   font-size: 0.85rem;
   color: #64748b;
 }
+
+.invite-panel {
+  margin-bottom: 20px;
+  padding: 12px;
+  border: 1px solid #334155;
+  border-radius: 10px;
+  background: #1e293b;
+  text-align: left;
+}
+
+.invite-panel p {
+  margin: 0 0 8px;
+  font-size: 0.9rem;
+}
+
+#inviteLinkInput {
+  width: 100%;
+  margin-bottom: 8px;
+  padding: 8px;
+  border-radius: 8px;
+  border: 1px solid #334155;
+  background: #0f172a;
+  color: #f1f5f9;
+  font-size: 0.85rem;
+}
+
+.lobby-status {
+  margin: 0 0 16px;
+  padding: 10px 12px;
+  border: 1px solid #334155;
+  border-radius: 10px;
+  background: #1e293b;
+  text-align: left;
+}
+
+.my-role {
+  margin: 0 0 8px;
+  font-weight: 700;
+  font-size: 0.95rem;
+}
+
+.player-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.player-list li {
+  display: flex;
+  justify-content: space-between;
+  padding: 4px 8px;
+  border-radius: 6px;
+  font-size: 0.85rem;
+  color: #94a3b8;
+}
+
+.player-list li.is-you {
+  color: #f1f5f9;
+}
+
+.player-list li.is-turn {
+  background: #334155;
+  color: #f8fafc;
+  font-weight: 700;
+}
