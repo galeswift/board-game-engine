@@ -22,12 +22,17 @@ it unless explicitly told otherwise.
   no longer zero-dependency (see below), and why it now needs a
   reachable database to run at all.
 - **`patchwork/`** — scaffold only: currently a structural clone of
-  `tic-tac-toe/` (same server.js/engine.js split, same game rules),
-  deployable but not yet real Patchwork. Real rules per the architecture
-  plan (Section 12) — asymmetric, time-track-driven turn order and
-  per-player economy — haven't been built yet. Don't treat
-  `patchwork/engine.js` as a starting point for those rules; it's
-  bootstrap-only and expected to be replaced wholesale.
+  `tic-tac-toe/`'s *very first* state (same server.js/engine.js split,
+  same game rules), deployable but not yet real Patchwork, and not yet
+  updated with any of the async-multiplayer work `tic-tac-toe/` has
+  since grown. Real rules per the architecture plan (Section 12) —
+  asymmetric, time-track-driven turn order and per-player economy —
+  haven't been built yet. Don't treat `patchwork/engine.js` as a
+  starting point for those rules; it's bootstrap-only and expected to
+  be replaced wholesale. **In-progress work plan and handoff notes:**
+  `docs/patchwork-next-steps.md` — read this before starting any
+  patchwork work; it has the full status (what's done, what's not) and
+  the reconstructed 33-patch reference data.
 - **`forbidden-island/`** — not started. Third proof-of-concept: tests
   asymmetric player roles, always-legal interrupt actions, and
   cooperative win/loss conditions.
