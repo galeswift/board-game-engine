@@ -69,8 +69,13 @@ test('applyAction places a patch, shrinks the pool, and flips the current player
 
 test('applyAction rotates the shape before placing it', () => {
   const state = createGame();
-  // patch-01 is a vertical 2x1 domino; rotated 90 degrees it's horizontal.
-  const result = applyAction(state, { type: 'placePatch', patchId: 'patch-01', rotation: 1, row: 0, col: 0 });
+  // patch-01 is a vertical 2x1 domino; rotated 90 degrees it's
+  // horizontal. row/col are the shape's *pivot*, not its top-left
+  // corner (see patches.js) - the pivot itself rotates along with the
+  // shape, so it isn't (0,0) anymore once rotated: at rotation 1 it's
+  // (0,1), which is why that's the pivot placed at (0,0) below to land
+  // the same two absolute cells a naive corner-anchor would have.
+  const result = applyAction(state, { type: 'placePatch', patchId: 'patch-01', rotation: 1, row: 0, col: 1 });
   assert.equal(result.error, null);
   assert.equal(result.state.quiltBoards.X[0], 'patch-01'); // (0,0)
   assert.equal(result.state.quiltBoards.X[1], 'patch-01'); // (0,1)

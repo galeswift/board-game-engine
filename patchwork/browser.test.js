@@ -59,6 +59,17 @@ async function pickFirstAvailablePatch(page) {
   return patchId;
 }
 
+// Highlighting is hover-driven (App.jsx's updateHighlights, fired from
+// QuiltBoard's onMouseEnter) - it no longer appears just from selecting
+// a patch, so placing one now means hovering a board cell first. The
+// board center is empty on a fresh game, so it's a safe hover target
+// for (almost) any patch shape/rotation.
+async function hoverBoardCenter(page, slot = 'X') {
+  const cell = page.locator(`#quiltBoard-${slot} .quilt-cell`).nth(4 * 9 + 4); // row 4, col 4
+  await cell.hover();
+  return cell;
+}
+
 test('browser end-to-end', async (t) => {
   const server = spawn(process.execPath, [path.join(__dirname, 'server.js')], {
     env: { ...process.env, PORT: String(PORT) },
@@ -80,15 +91,39 @@ test('browser end-to-end', async (t) => {
       await page.locator('#rotateBtn').click();
       await waitFor(async () => (await page.locator('#rotateBtn').textContent()) === 'Rotate (90°)');
 
-      // The tile for the placed patch should now be disabled once
-      // placed, and a highlighted cell should be clickable on X's board.
-      const highlightedCell = page.locator('#quiltBoard-X .quilt-cell.highlight').first();
-      await highlightedCell.waitFor();
-      await highlightedCell.click();
+      // Hovering the board previews the placement (a highlighted
+      // footprint); clicking that same cell places it.
+      const cell = await hoverBoardCenter(page);
+      await page.locator('#quiltBoard-X .quilt-cell.highlight').first().waitFor();
+      await cell.click();
 
       await waitFor(async () => (await page.locator(`.patch-tile[data-patch-id="${patchId}"]`).isDisabled()));
       await waitFor(async () => (await page.locator('#quiltBoard-X .quilt-cell.filled').count()) > 0);
       assert.equal(await page.locator('#status').textContent(), 'Your turn — pick a patch below', "it's a fresh pick for the other player (pass-and-play, same status text)");
+
+      await page.close();
+    });
+
+    await t.test('local game: hovering the non-active board does not preview or place on the active one', async () => {
+      const page = await browser.newPage();
+      await page.goto(BASE);
+      await page.locator('#newLocalGameBtn').click();
+      await waitFor(async () => (await page.locator('#status').textContent()) === 'Your turn — pick a patch below');
+
+      const patchId = await pickFirstAvailablePatch(page); // X's turn - X's board is active, O's is not
+      const oCell = page.locator('#quiltBoard-O .quilt-cell').nth(4 * 9 + 4);
+      await oCell.hover();
+
+      // No highlight anywhere - not on the hovered (inactive) board, and
+      // not leaked onto the active board either.
+      assert.equal(await page.locator('.quilt-cell.highlight').count(), 0);
+
+      await oCell.click();
+      // Nothing placed anywhere, and the selection is untouched (still
+      // mid-placement on the same patch) - a proxy for "no
+      // state-changing POST happened".
+      assert.equal(await page.locator('.quilt-cell.filled').count(), 0);
+      assert.equal(await page.locator('#status').textContent(), `Choose where to place ${patchId} on your board`);
 
       await page.close();
     });
@@ -111,9 +146,9 @@ test('browser end-to-end', async (t) => {
       assert.equal(await guestPage.locator('#status').textContent(), 'Waiting for the other player…');
 
       const patchId = await pickFirstAvailablePatch(hostPage);
-      const highlightedCell = hostPage.locator('#quiltBoard-X .quilt-cell.highlight').first();
-      await highlightedCell.waitFor();
-      await highlightedCell.click();
+      const cell = await hoverBoardCenter(hostPage);
+      await hostPage.locator('#quiltBoard-X .quilt-cell.highlight').first().waitFor();
+      await cell.click();
 
       // Guest's view updates live: it's now their turn, and the placed
       // patch is greyed out on their picker too (shared pool).

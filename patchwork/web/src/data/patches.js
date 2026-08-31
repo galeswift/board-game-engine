@@ -43,6 +43,16 @@ export const PATCHES = [
   { id: 'patch-33', cover: [3, 3], cells: [[2, 0], [0, 1], [1, 1], [2, 1], [0, 2], [1, 2]] },
 ];
 
+// The pivot is a first-class part of each shape, matching
+// patchwork/patches.js exactly (same formula, same rotation): it's the
+// point "row, col" means in every server request (GET .../actions'
+// anchor domain, and placePatch itself) - the client never invents its
+// own separate notion of a placement anchor, it just rotates the same
+// pivot the server does.
+for (const patch of PATCHES) {
+  patch.pivot = [Math.floor((patch.cover[0] - 1) / 2), Math.floor((patch.cover[1] - 1) / 2)];
+}
+
 const BY_ID = new Map(PATCHES.map((patch) => [patch.id, patch]));
 
 export function getPatch(id) {
@@ -50,15 +60,18 @@ export function getPatch(id) {
 }
 
 // Same rotation formula as patches.js: 90deg clockwise per step,
-// (r, c) -> (c, rows-1-r), re-deriving the bounding box each time.
+// (r, c) -> (c, rows-1-r), re-deriving the bounding box each time. The
+// pivot goes through the identical per-step transform as every cell.
 export function rotatePatch(patch, rotation) {
   let rows = patch.cover[0];
   let cols = patch.cover[1];
   let cells = patch.cells;
+  let pivot = patch.pivot;
   const steps = ((rotation % 4) + 4) % 4;
   for (let i = 0; i < steps; i++) {
     cells = cells.map(([r, c]) => [c, rows - 1 - r]);
+    pivot = [pivot[1], rows - 1 - pivot[0]];
     [rows, cols] = [cols, rows];
   }
-  return { rows, cols, cells };
+  return { rows, cols, cells, pivot };
 }

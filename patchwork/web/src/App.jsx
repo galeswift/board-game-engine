@@ -5,6 +5,7 @@ import RotateControl from './components/RotateControl.jsx';
 import LobbyStatus from './components/LobbyStatus.jsx';
 import InvitePanel from './components/InvitePanel.jsx';
 import Controls from './components/Controls.jsx';
+import { getPatch, rotatePatch } from './data/patches.js';
 
 const SLOTS = ['X', 'O'];
 
@@ -66,6 +67,7 @@ export default function App() {
   const [selectedPatchId, setSelectedPatchId] = useState(null);
   const [rotation, setRotation] = useState(0);
   const [placementDomain, setPlacementDomain] = useState([]);
+  const [highlightedCells, setHighlightedCells] = useState([]);
 
   const initedRef = useRef(false);
   const playerIdRef = useRef(null);
@@ -79,6 +81,7 @@ export default function App() {
     setSelectedPatchId(null);
     setRotation(0);
     setPlacementDomain([]);
+    setHighlightedCells([]);
   }
 
   async function createGame(requestedMode) {
@@ -180,7 +183,10 @@ export default function App() {
 
   async function placeSelectedPatch(row, col) {
     if (!selectedPatchId) return;
-    const action = { type: 'placePatch', patchId: selectedPatchId, rotation, row, col };
+    const pivot = nearestInDomain(row, col, placementDomain);
+    if (!pivot) return; // no legal placement anywhere near this cell
+    const [pivotRow, pivotCol] = pivot;
+    const action = { type: 'placePatch', patchId: selectedPatchId, rotation, row: pivotRow, col: pivotCol };
     if (playerId) action.playerId = playerId;
     const res = await fetch(`/api/games/${gameId}/actions`, {
       method: 'POST',
@@ -193,6 +199,65 @@ export default function App() {
       clearSelection();
       setLegalActions(await fetchLegalActions(gameId, playerId));
     }
+  }
+  
+  async function addHighlightedCell(row, col) {
+    setHighlightedCells((prev) => {
+      const newSet = new Set(prev.map(([r, c]) => `${r},${c}`));
+      newSet.add(`${row},${col}`);
+      return Array.from(newSet).map((s) => s.split(',').map(Number));
+    });
+  }
+
+  async function removeHighlightedCell(row, col) {
+    setHighlightedCells((prev) => {
+      const newSet = new Set(prev.map(([r, c]) => `${r},${c}`));
+      newSet.delete(`${row},${col}`);
+      return Array.from(newSet).map((s) => s.split(',').map(Number));
+    });
+  }
+
+  async function clearHighlightedCells() {
+    setHighlightedCells([]);
+  }
+
+  // `row`/`col` mean the shape's *pivot* on both ends of the wire -
+  // patches.js's rotatePatch (imported below) rotates the pivot right
+  // alongside the cells, identically on client and server, so there's
+  // no separate anchor formula to keep in sync here. `placementDomain`
+  // is already a list of legal pivot positions straight from the
+  // server (see fetchPlacementDomain above); hovering/clicking near the
+  // edge just snaps to the closest one in that list - no board-size or
+  // shape-fit math needed client-side to do that.
+  function nearestInDomain(row, col, domain) {
+    if (domain.length === 0) return null;
+    let best = null;
+    let bestDist = Infinity;
+    for (const [r, c] of domain) {
+      const dist = Math.abs(r - row) + Math.abs(c - col);
+      if (dist < bestDist) {
+        bestDist = dist;
+        best = [r, c];
+      }
+    }
+    return best;
+  }
+
+  async function updateHighlights(row, col) {
+    clearHighlightedCells();
+    const pivot = nearestInDomain(row, col, placementDomain);
+    if (!pivot) return;
+    const patch = getPatch(selectedPatchId);
+    const shape = rotatePatch(patch, rotation);
+    const [pivotRow, pivotCol] = pivot;
+    const anchorRow = pivotRow - shape.pivot[0];
+    const anchorCol = pivotCol - shape.pivot[1];
+    for (const [r, c] of shape.cells) {
+      addHighlightedCell(anchorRow + r, anchorCol + c);
+    }
+  }
+
+  async function clearHighlights(row, col) {      
   }
 
   async function handleShare() {
@@ -250,8 +315,8 @@ export default function App() {
   }
 
   const canAct = legalActions.some((a) => a.type === 'selectPatch');
-  const interactiveSlot = canAct ? gameState.currentPlayer : null;
-  const highlighted = new Set(placementDomain.map(([row, col]) => `${row},${col}`));
+  const interactiveSlot = canAct ? gameState.currentPlayer : null;  
+  const highlighted = new Set(highlightedCells.map(([row, col]) => `${row},${col}`));
 
   const statusText = gameState.status === 'lobby'
     ? 'Waiting for another player to join… share the link!'
@@ -280,6 +345,7 @@ export default function App() {
             interactive={slot === interactiveSlot && !!selectedPatchId}
             highlighted={highlighted}
             onCellClick={placeSelectedPatch}
+            onUpdateHighlights={updateHighlights}
           />
         ))}
       </div>

@@ -4,7 +4,7 @@ const BOARD_SIZE = 9;
 // strings, from the server's placement-anchor domain - see
 // engine.js's queryLegalActions) is only meaningful when `interactive`
 // is true; every other board renders read-only.
-export default function QuiltBoard({ slot, label, board, interactive, highlighted, onCellClick }) {
+export default function QuiltBoard({ slot, label, board, interactive, highlighted, onCellClick, onUpdateHighlights, onClearHighlights }) {
   return (
     <div className="quilt-board-wrap">
       <p className="quilt-board-label">{label}</p>
@@ -17,10 +17,10 @@ export default function QuiltBoard({ slot, label, board, interactive, highlighte
             <button
               key={i}
               className={['quilt-cell', cell && 'filled', isHighlighted && 'highlight'].filter(Boolean).join(' ')}
-              disabled={!isHighlighted}
               data-row={row}
               data-col={col}
-              onClick={() => onCellClick(row, col)}
+              onClick={() => interactive && onCellClick(row, col)}
+              onMouseEnter={() => interactive && onUpdateHighlights(row, col)}
             />
           );
         })}

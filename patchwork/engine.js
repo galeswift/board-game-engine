@@ -40,18 +40,25 @@ function startGame(state) {
 }
 
 // True if every cell of `shape` (already rotated) fits inside the board
-// anchored at (row, col) without overlapping an occupied cell. Bounds
-// are checked by the caller (row/col + shape.rows/cols <= BOARD_SIZE);
-// this only checks occupancy.
+// with its top-left corner at (row, col) without overlapping an
+// occupied cell. Bounds are checked by the caller (row/col +
+// shape.rows/cols <= BOARD_SIZE); this only checks occupancy. Corner
+// coordinates, not pivot coordinates - see queryLegalActions/applyAction
+// below for where the pivot<->corner conversion actually happens.
 function fits(board, shape, row, col) {
   return shape.cells.every(([dr, dc]) => board[(row + dr) * BOARD_SIZE + (col + dc)] === null);
 }
 
+// Scans in corner coordinates (bounded and simple: row/col + shape's
+// own rows/cols <= BOARD_SIZE) but returns the domain in pivot
+// coordinates - shape.pivot (see patches.js) is the one, shared
+// definition of what "row, col" means on the wire for this shape, so
+// every corner anchor gets shifted by it before being handed back.
 function placementDomain(board, shape) {
   const domain = [];
   for (let row = 0; row + shape.rows <= BOARD_SIZE; row++) {
     for (let col = 0; col + shape.cols <= BOARD_SIZE; col++) {
-      if (fits(board, shape, row, col)) domain.push([row, col]);
+      if (fits(board, shape, row, col)) domain.push([row + shape.pivot[0], col + shape.pivot[1]]);
     }
   }
   return domain;
@@ -89,7 +96,7 @@ function queryLegalActions(state, { patchId, rotation } = {}) {
 // Pure function: (state, action) -> { state, error }
 // Never mutates the input state. Re-derives the same fit check
 // queryLegalActions would report - never trusts the client's own
-// rotation/anchor math.
+// rotation/pivot math.
 function applyAction(state, action) {
   if (state.status === 'lobby') {
     return { state, error: 'lobby-not-started' };
@@ -101,6 +108,11 @@ function applyAction(state, action) {
     return { state, error: 'unknown-action' };
   }
 
+  // action.row/action.col are the shape's *pivot* position on the board
+  // - the same coordinate space queryLegalActions' anchor domain is in,
+  // and the same one the client renders/highlights in (see
+  // patches.js's rotatePatch). Converted to a top-left corner here,
+  // once, before any of the actual fit/bounds checking below.
   const { patchId, row, col } = action;
   if (typeof patchId !== 'string' || !state.availablePatches.includes(patchId)) {
     return { state, error: 'invalid-patch' };
@@ -115,18 +127,20 @@ function applyAction(state, action) {
 
   const rotation = ((Number(action.rotation) || 0) % 4 + 4) % 4;
   const shape = rotatePatch(patch, rotation);
-  if (row < 0 || col < 0 || row + shape.rows > BOARD_SIZE || col + shape.cols > BOARD_SIZE) {
+  const anchorRow = row - shape.pivot[0];
+  const anchorCol = col - shape.pivot[1];
+  if (anchorRow < 0 || anchorCol < 0 || anchorRow + shape.rows > BOARD_SIZE || anchorCol + shape.cols > BOARD_SIZE) {
     return { state, error: 'invalid-placement' };
   }
 
   const board = state.quiltBoards[state.currentPlayer];
-  if (!fits(board, shape, row, col)) {
+  if (!fits(board, shape, anchorRow, anchorCol)) {
     return { state, error: 'invalid-placement' };
   }
 
   const nextBoard = board.slice();
   for (const [dr, dc] of shape.cells) {
-    nextBoard[(row + dr) * BOARD_SIZE + (col + dc)] = patchId;
+    nextBoard[(anchorRow + dr) * BOARD_SIZE + (anchorCol + dc)] = patchId;
   }
 
   const availablePatches = state.availablePatches.filter((id) => id !== patchId);
