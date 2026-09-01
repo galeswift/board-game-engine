@@ -17,6 +17,7 @@ const crypto = require('crypto');
 const { WebSocketServer, WebSocket } = require('ws');
 const { createGame, applyAction, queryLegalActions, startGame } = require('./engine');
 const { ensureSchema, insertGame, getGame, saveGame } = require('./db');
+const { PATCHES } = require('./patches');
 
 const PORT = process.env.PORT || 3000;
 const PUBLIC_DIR = path.join(__dirname, 'web', 'dist');
@@ -148,6 +149,17 @@ function broadcastPresence(gameId, slot, connected, exclude) {
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, `http://${req.headers.host}`);
   const { pathname } = url;
+
+  // GET /api/patches -> the 33 real patches' shape/cost/time/income data,
+  // for display only (the picker's icons, cost/time labels, the
+  // hover/rotate preview) - never for legality, which always comes from
+  // a game's own /actions domain. Serves patches.js's PATCHES directly
+  // (pivot already computed at module load - see patches.js) so the
+  // client never hand-maintains its own copy of this reference data.
+  if (pathname === '/api/patches' && req.method === 'GET') {
+    sendJSON(res, 200, { patches: PATCHES });
+    return;
+  }
 
   // POST /api/games -> create a new game. { mode: 'local' | 'multiplayer' },
   // defaulting to 'local' so existing no-body callers are unaffected.

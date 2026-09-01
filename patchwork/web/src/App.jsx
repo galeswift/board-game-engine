@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import QuiltBoard from './components/QuiltBoard.jsx';
 import TimeTrack from './components/TimeTrack.jsx';
 import PatchPicker from './components/PatchPicker.jsx';
@@ -6,7 +6,7 @@ import RotateControl from './components/RotateControl.jsx';
 import LobbyStatus from './components/LobbyStatus.jsx';
 import InvitePanel from './components/InvitePanel.jsx';
 import Controls from './components/Controls.jsx';
-import { getPatch, rotatePatch } from './data/patches.js';
+import { loadPatches, rotatePatch } from './data/patches.js';
 
 const SLOTS = ['X', 'O'];
 
@@ -53,6 +53,7 @@ async function joinLobbyRequest(gameId, inviteToken) {
 export default function App() {
   const [gameId, setGameId] = useState(null);
   const [mode, setMode] = useState('local');
+  const [patches, setPatches] = useState([]);
   const [playerId, setPlayerId] = useState(null);
   const [mySlot, setMySlot] = useState(null);
   const [gameState, setGameState] = useState(null);
@@ -265,7 +266,8 @@ export default function App() {
     clearHighlightedCells();
     const pivot = nearestInDomain(row, col, placementDomain);
     if (!pivot) return;
-    const patch = getPatch(selectedPatchId);
+    const patch = patchesById.get(selectedPatchId);
+    if (!patch) return; // patches haven't loaded yet - shouldn't happen (nothing is selectable until they have), but don't crash if it does
     const shape = rotatePatch(patch, rotation);
     const [pivotRow, pivotCol] = pivot;
     const anchorRow = pivotRow - shape.pivot[0];
@@ -293,6 +295,7 @@ export default function App() {
   useEffect(() => {
     if (initedRef.current) return;
     initedRef.current = true;
+    loadPatches().then(setPatches);
     const params = new URLSearchParams(window.location.search);
     const existingId = params.get('game');
     if (existingId) {
@@ -301,6 +304,11 @@ export default function App() {
       createGame('local');
     }
   }, []);
+
+  // Built once per fetch, not re-derived per lookup - the only client-side
+  // use of this data is display (picker icons, the hover/rotate preview),
+  // never legality (see docs/architecture.md, "Client Authority: Zero").
+  const patchesById = useMemo(() => new Map(patches.map((p) => [p.id, p])), [patches]);
 
   useEffect(() => {
     if (!gameId) return;
@@ -378,6 +386,7 @@ export default function App() {
       </div>
       <TimeTrack playerTimePositions={gameState.timeTrackPositions} />
       <PatchPicker
+        patches={patches}
         availablePatches={gameState.availablePatches}
         playerMoney={mode === 'multiplayer' ? gameState.playerMoney[mySlot] : gameState.playerMoney[gameState.currentPlayer]}
         selectedPatchId={selectedPatchId}

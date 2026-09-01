@@ -84,7 +84,7 @@ test('browser end-to-end', async (t) => {
       const page = await browser.newPage();
       await page.goto(BASE);
       await page.locator('#newLocalGameBtn').click();
-      await waitFor(async () => (await page.locator('#status').textContent()) === 'Your turn — pick a patch below');
+      await waitFor(async () => (await page.locator('#status').textContent()) === 'Player X turn — pick a patch below');
 
       const patchId = await pickFirstAvailablePatch(page);
       await waitFor(async () => (await page.locator('#rotateBtn').textContent()) === 'Rotate (0°)');
@@ -99,7 +99,9 @@ test('browser end-to-end', async (t) => {
 
       await waitFor(async () => (await page.locator(`.patch-tile[data-patch-id="${patchId}"]`).isDisabled()));
       await waitFor(async () => (await page.locator('#quiltBoard-X .quilt-cell.filled').count()) > 0);
-      assert.equal(await page.locator('#status').textContent(), 'Your turn — pick a patch below', "it's a fresh pick for the other player (pass-and-play, same status text)");
+      // X just moved and is still ahead of O (who hasn't moved at all
+      // yet), so O - still further behind on the time track - goes next.
+      assert.equal(await page.locator('#status').textContent(), 'Player O turn — pick a patch below', "turn passes to whoever is behind on the time track");
 
       await page.close();
     });
@@ -108,7 +110,7 @@ test('browser end-to-end', async (t) => {
       const page = await browser.newPage();
       await page.goto(BASE);
       await page.locator('#newLocalGameBtn').click();
-      await waitFor(async () => (await page.locator('#status').textContent()) === 'Your turn — pick a patch below');
+      await waitFor(async () => (await page.locator('#status').textContent()) === 'Player X turn — pick a patch below');
 
       const patchId = await pickFirstAvailablePatch(page); // X's turn - X's board is active, O's is not
       const oCell = page.locator('#quiltBoard-O .quilt-cell').nth(4 * 9 + 4);
@@ -142,7 +144,7 @@ test('browser end-to-end', async (t) => {
       await guestPage.goto(inviteLink);
       await waitForRole(guestPage, 'You are O');
 
-      await waitFor(async () => (await hostPage.locator('#status').textContent()) === 'Your turn — pick a patch below');
+      await waitFor(async () => (await hostPage.locator('#status').textContent()) === 'Player X turn — pick a patch below');
       assert.equal(await guestPage.locator('#status').textContent(), 'Waiting for the other player…');
 
       const patchId = await pickFirstAvailablePatch(hostPage);
@@ -150,9 +152,10 @@ test('browser end-to-end', async (t) => {
       await hostPage.locator('#quiltBoard-X .quilt-cell.highlight').first().waitFor();
       await cell.click();
 
-      // Guest's view updates live: it's now their turn, and the placed
-      // patch is greyed out on their picker too (shared pool).
-      await waitFor(async () => (await guestPage.locator('#status').textContent()) === 'Your turn — pick a patch below');
+      // Guest's view updates live: it's now their turn (still behind on
+      // the time track), and the placed patch is greyed out on their
+      // picker too (shared pool).
+      await waitFor(async () => (await guestPage.locator('#status').textContent()) === 'Player O turn — pick a patch below');
       await waitFor(async () => await guestPage.locator(`.patch-tile[data-patch-id="${patchId}"]`).isDisabled());
       await waitFor(async () => (await hostPage.locator('#status').textContent()) === 'Waiting for the other player…');
 
