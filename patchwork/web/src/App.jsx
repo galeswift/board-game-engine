@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import QuiltBoard from './components/QuiltBoard.jsx';
+import TimeTrack from './components/TimeTrack.jsx';
 import PatchPicker from './components/PatchPicker.jsx';
 import RotateControl from './components/RotateControl.jsx';
 import LobbyStatus from './components/LobbyStatus.jsx';
@@ -181,6 +182,23 @@ export default function App() {
     setPlacementDomain(await fetchPlacementDomain(gameId, playerId, selectedPatchId, nextRotation));
   }
 
+  
+  async function advanceTimeToken() {
+    const action = { type: 'advanceTimeToken' };
+    if (playerId) action.playerId = playerId;
+    const res = await fetch(`/api/games/${gameId}/actions`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(action),
+    });
+    const data = await res.json();
+    if (data.state) {
+      setGameState(data.state);
+      clearSelection();
+      setLegalActions(await fetchLegalActions(gameId, playerId));
+    }
+  }
+
   async function placeSelectedPatch(row, col) {
     if (!selectedPatchId) return;
     const pivot = nearestInDomain(row, col, placementDomain);
@@ -317,7 +335,6 @@ export default function App() {
   const canAct = legalActions.some((a) => a.type === 'selectPatch');
   const interactiveSlot = canAct ? gameState.currentPlayer : null;  
   const highlighted = new Set(highlightedCells.map(([row, col]) => `${row},${col}`));
-
   const statusText = gameState.status === 'lobby'
     ? 'Waiting for another player to join… share the link!'
     : gameState.status === 'complete'
@@ -326,8 +343,7 @@ export default function App() {
         ? "Waiting for the other player…"
         : selectedPatchId
           ? `Choose where to place ${selectedPatchId} on your board`
-          : "Your turn — pick a patch below";
-
+          : `Player ${gameState.currentPlayer} turn — pick a patch below`;
   return (
     <main className="patchwork-app">
       <h1>Patchwork</h1>
@@ -349,11 +365,21 @@ export default function App() {
           />
         ))}
       </div>
-
+      <button onClick={advanceTimeToken} disabled={mode === 'multiplayer' && mySlot !== gameState.currentPlayer}>
+        Advance Time Token
+      </button>
       <RotateControl rotation={rotation} onRotate={rotateSelected} disabled={!selectedPatchId} />
-
+      <div className="button-status">
+        <span>X Money: {gameState.playerMoney['X']}</span>
+      </div>
+      
+      <div className="button-status">
+        <span>O Money: {gameState.playerMoney['O']}</span>
+      </div>
+      <TimeTrack playerTimePositions={gameState.timeTrackPositions} />
       <PatchPicker
         availablePatches={gameState.availablePatches}
+        playerMoney={mode === 'multiplayer' ? gameState.playerMoney[mySlot] : gameState.playerMoney[gameState.currentPlayer]}
         selectedPatchId={selectedPatchId}
         onSelect={selectPatch}
         disabled={!canAct}

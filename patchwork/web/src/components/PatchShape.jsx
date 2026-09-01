@@ -2,7 +2,7 @@
 // display - the shape geometry always comes from data/patches.js on the
 // client (fine for rendering) or the server's returned domain (for
 // legality, never computed here).
-export default function PatchShape({ shape, size = 10 }) {
+export default function PatchShape({ shape, size = 10, cost, time}) {
   const filled = new Set(shape.cells.map(([r, c]) => `${r},${c}`));
   const cells = [];
   for (let r = 0; r < shape.rows; r++) {
@@ -22,6 +22,9 @@ export default function PatchShape({ shape, size = 10 }) {
       {cells.map((isFilled, i) => (
         <span key={i} className={isFilled ? 'patch-shape-cell filled' : 'patch-shape-cell'} />
       ))}
+      <div>
+        <span>Cost: {cost} Time: {time}</span>
+      </div>
     </div>
   );
 }

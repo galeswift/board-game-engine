@@ -8,7 +8,10 @@ const { PATCHES } = require('./patches');
 
 const PORT = 35699; // distinct from tic-tac-toe's *.test.js ports (345xx/346xx)
 const BASE = `http://localhost:${PORT}`;
-const ALL_PATCH_IDS = PATCHES.map((p) => p.id);
+// createGame() seeds each player with 5 starting buttons (engine.js) -
+// queryLegalActions' selectPatch domain is filtered to what's actually
+// affordable, so a fresh game doesn't offer every patch.
+const AFFORDABLE_PATCH_IDS = PATCHES.filter((p) => p.cost <= 5).map((p) => p.id);
 
 async function waitForServer(timeoutMs = 5000) {
   const deadline = Date.now() + timeoutMs;
@@ -79,22 +82,26 @@ test('legal actions and preview endpoints', async (t) => {
   try {
     await waitForServer();
 
-    await t.test('GET /api/games/:id/actions lists every patch as pickable on a fresh game', async () => {
+    await t.test('GET /api/games/:id/actions lists every affordable patch as pickable on a fresh game, plus advanceTimeToken', async () => {
       const { gameId } = await createGame();
       const res = await fetch(`${BASE}/api/games/${gameId}/actions`);
       assert.equal(res.status, 200);
       const body = await res.json();
       assert.deepEqual(body.actions, [
-        { type: 'selectPatch', params: { patchId: { domain: ALL_PATCH_IDS } } },
+        { type: 'selectPatch', params: { patchId: { domain: AFFORDABLE_PATCH_IDS } } },
+        { type: 'advanceTimeToken', params: {} },
       ]);
     });
 
     await t.test('the pickable-patch domain shrinks after a placement', async () => {
       const { gameId } = await createGame();
       await placePatch(gameId, { patchId: 'patch-01', row: 0, col: 0 });
+      // Turn passes to O (still behind on the time track after X's move),
+      // so this now reports O's domain - O's 5 buttons are untouched, so
+      // the only change from a fresh game is patch-01 no longer available.
       const { actions } = await fetchActions(gameId);
       assert.equal(actions[0].params.patchId.domain.includes('patch-01'), false);
-      assert.equal(actions[0].params.patchId.domain.length, 32);
+      assert.equal(actions[0].params.patchId.domain.length, AFFORDABLE_PATCH_IDS.length - 1);
     });
 
     await t.test('GET /actions with a patchId reports the placement-anchor domain for that patch', async () => {
@@ -293,7 +300,7 @@ test('legal actions and preview endpoints', async (t) => {
       const o = await join(gameId, tokenFor(invites, 'O')); // now in-progress, X's turn
 
       const xView = await fetchActions(gameId, { playerId: x.playerId });
-      assert.equal(xView.actions.length, 1, "the player whose turn it is sees the real domain");
+      assert.equal(xView.actions.length, 2, "the player whose turn it is sees the real domain (selectPatch + advanceTimeToken)");
 
       const oView = await fetchActions(gameId, { playerId: o.playerId });
       assert.deepEqual(oView.actions, [], "not this player's turn");

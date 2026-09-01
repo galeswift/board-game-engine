@@ -144,6 +144,11 @@ button {
   min-height: 44px;
 }
 
+button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
 button:active {
   background: #1d4ed8;
 }

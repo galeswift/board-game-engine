@@ -287,6 +287,7 @@ const server = http.createServer(async (req, res) => {
         error: result.error,
       });
     } catch (e) {
+      console.error('Failed to read JSON body for action:', e);
       sendJSON(res, 400, { error: 'invalid-json' });
     }
     return;
@@ -311,6 +312,7 @@ const server = http.createServer(async (req, res) => {
         error: result.error,
       });
     } catch (e) {
+      console.error('Failed to read JSON body for action preview:', e);
       sendJSON(res, 400, { error: 'invalid-json' });
     }
     return;

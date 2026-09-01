@@ -164,7 +164,10 @@ test('WebSocket live channel', async (t) => {
       ]);
 
       assert.deepEqual(messageX.actions, [], "not X's turn anymore");
-      assert.equal(messageO.actions[0]?.params.patchId.domain.length, 32, "it's now O's turn, one patch already taken");
+      // O still has all 5 starting buttons, so O's affordable-patch count
+      // is a fresh game's minus the one X just took (see server.test.js's
+      // AFFORDABLE_PATCH_IDS for where 24 comes from: patches costing <= 5).
+      assert.equal(messageO.actions[0]?.params.patchId.domain.length, 23, "it's now O's turn, one patch already taken");
       assert.deepEqual(messageX.lobby, { X: { claimed: true }, O: { claimed: true } }, 'the push includes a live lobby summary too');
 
       socketX.close();
