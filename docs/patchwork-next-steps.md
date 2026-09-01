@@ -218,6 +218,56 @@ instead of prototyped in vanilla JS and then rewritten.
   and a multiplayer placement live-updating a second browser context
   with the turn flipped and the picker in sync.
 
+- **Hover placement preview + shared client/server pivot.** Follow-up
+  UX pass on top of the MVP slice above, done interactively with the
+  user driving a lot of the client code directly. Hovering the board
+  now previews the selected patch's rotated footprint before you click
+  (`App.jsx`'s `updateHighlights`, wired from `QuiltBoard`'s
+  `onMouseEnter`) instead of only highlighting on click.
+
+  Mid-way through, the user pushed back on an early version that
+  computed the hover "pivot" (treating the hovered cell as the shape's
+  center, not its top-left corner) purely client-side, invented fresh
+  in `App.jsx` and unknown to the server - explicitly asked for the
+  pivot to be a first-class part of the shape instead, shared
+  identically by both ends. Result: `patches.js` (both the server copy
+  and `web/src/data/patches.js`) now computes a `pivot: [row, col]` per
+  patch at module load (`floor((rows-1)/2), floor((cols-1)/2)` on the
+  unrotated shape), and `rotatePatch` rotates the pivot through the
+  identical per-step transform as `cells`, so it stays attached to the
+  shape through every rotation. `engine.js`'s wire contract changed to
+  match: `row`/`col` in both `queryLegalActions`' anchor domain and
+  `applyAction`'s `placePatch` now mean the shape's *pivot* position,
+  not its top-left corner - the corner-space math (`fits`, the domain
+  scan) is unchanged internally, just shifted by `shape.pivot` at the
+  boundary. The client now just snaps a hover/click to the nearest
+  pivot in the server-returned domain (`nearestInDomain` in `App.jsx`,
+  a plain list lookup, no board-geometry knowledge needed) instead of
+  computing its own clamp/anchor math.
+
+  Found and fixed a real bug during this work: `QuiltBoard.jsx` wired
+  `onClick`/`onMouseEnter` unconditionally on every cell of *every*
+  board, so hovering the non-active board (the opponent's, or in local
+  mode whichever slot isn't `currentPlayer`) fed that board's
+  coordinates into the single shared placement-preview state and
+  corrupted the highlight shown on the actually-active board. Fixed by
+  gating both handlers on the `interactive` prop, with a regression
+  test in `browser.test.js` covering it. Test suite is now 46.
+
+- **Dockerfile bug found via a real Railway crash, fixed and verified
+  properly.** The engine.js rewrite in the MVP slice added
+  `patchwork/patches.js` as a new required module, but the
+  Dockerfile's `COPY server.js engine.js db.js ./` line was never
+  updated to include it - worked fine in every local test (`node
+  server.js` always runs from the full source tree, so the missing
+  file never surfaced) but crash-looped on Railway
+  (`Cannot find module './patches'`). Fixed the `COPY` line, and this
+  time actually verified it by building the real image
+  (`docker build`) and running the container against local Postgres
+  before pushing again, rather than trusting local `node` execution -
+  worth doing that verification step for any future Dockerfile change
+  here, since local testing structurally can't catch this class of bug.
+
 ### Not started
 - **The full real Patchwork engine and UI.** Asymmetric, time-track-driven
   turn order, per-player economy (buttons), phase transitions (setup →
