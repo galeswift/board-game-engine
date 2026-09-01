@@ -19,14 +19,26 @@ export default function TimeTrack({ playerTimePositions, trackLength, buttonInco
   return (
     <div className="time-track">
       <div className="time-track-bar">
-        {buttonIncomeSpaces.map((space) => (
-          <span
-            key={space}
-            className="time-track-tick"
-            style={{ left: percentFor(space) }}
-            title={`Button income at space ${space}`}
-          />
-        ))}
+        <div className='time-track-stack'>
+            {buttonIncomeSpaces.map((space) => (
+            <span
+                key={space}
+                className={['p0-time-track-tick']}
+                style={{ left: percentFor(space) }}
+                title={`Button income at space ${space}`}
+            />
+            ))}
+        </div>
+        <div className='time-track-stack'>
+            {buttonIncomeSpaces.map((space) => (
+            <span
+                key={space}
+                className={['p1-time-track-tick']}
+                style={{ left: percentFor(space) }}
+                title={`Button income at space ${space}`}
+            />
+            ))}
+        </div>
         <span
           className={['time-track-marker', 'slot-0', close && 'nudge-up'].filter(Boolean).join(' ')}
           style={{ left: percentFor(playerTimePositions[0]) }}

@@ -176,8 +176,7 @@ h1 {
 }
 
 .money-pill.is-turn {
-  border-color: #fbbf24;
-  background: #334155;
+  background: white;
 }
 
 .money-pill-slot {
@@ -190,25 +189,64 @@ h1 {
   color: #fbbf24;
 }
 
+ .is-turn .money-pill-slot {
+  color: black;
+}
+
+ .is-turn .money-pill-amount{
+  color: #dda004;
+}
+
+.pill-slot-0 {
+  border: 2px solid #eb5a17;
+}
+
+.pill-slot-1 {
+  border: 2px solid #01ff88;
+}
+
+
 .time-track {
   margin: 0 0 16px;
 }
 
 .time-track-bar {
   position: relative;
-  height: 8px;
-  margin: 18px 4px 6px;
-  border-radius: 999px;
-  background: #1e293b;
+  display: flex;
+  flex-direction: column;
+  background: #334155;
   border: 1px solid #334155;
+  border-radius: 5px;  
 }
 
-.time-track-tick {
+.time-track-stack
+{
+  position: relative;
+  height: 10px;
+  width: 100%;
+  border: 1px solid white;
+  background: #60a5fa;
+  margin: 4px 0px;
+  border-radius: 5px;
+  overflow: hidden;
+}
+
+
+.p0-time-track-tick {
   position: absolute;
   top: 0;
   bottom: 0;
   width: 2px;
-  background: #64748b;
+  background: #eb5a17;
+  transform: translateX(-1px);
+}
+
+.p1-time-track-tick {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: #01ff88;
   transform: translateX(-1px);
 }
 
@@ -230,11 +268,11 @@ h1 {
 }
 
 .time-track-marker.slot-0 {
-  background: #60a5fa;
+  background: #eb5a17;
 }
 
 .time-track-marker.slot-1 {
-  background: #fbbf24;
+  background: #01ff88;
 }
 
 .time-track-marker.nudge-up {

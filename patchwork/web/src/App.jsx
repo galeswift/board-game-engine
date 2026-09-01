@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import QuiltBoard from './components/QuiltBoard.jsx';
 import TimeTrack from './components/TimeTrack.jsx';
+import MoneyStatus from './components/MoneyStatus.jsx';
 import PatchPicker from './components/PatchPicker.jsx';
 import RotateControl from './components/RotateControl.jsx';
 import LobbyStatus from './components/LobbyStatus.jsx';
@@ -387,14 +388,7 @@ export default function App() {
         Advance Time Token
       </button>
       <RotateControl rotation={rotation} onRotate={rotateSelected} disabled={!selectedPatchId} />
-      <div className="money-row">
-        {SLOTS.map((slot) => (
-          <div key={slot} className={['money-pill', slot === gameState.currentPlayer && 'is-turn'].filter(Boolean).join(' ')}>
-            <span className="money-pill-slot">P{slot + 1}</span>
-            <span className="money-pill-amount">{gameState.playerMoney[slot]}</span>
-          </div>
-        ))}
-      </div>
+      <MoneyStatus gameState={gameState} slots={SLOTS} />
       <TimeTrack
         playerTimePositions={gameState.timeTrackPositions}
         trackLength={trackInfo.trackLength}
