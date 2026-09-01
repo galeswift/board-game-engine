@@ -18,6 +18,7 @@ const { WebSocketServer, WebSocket } = require('ws');
 const { createGame, applyAction, queryLegalActions, startGame } = require('./engine');
 const { ensureSchema, insertGame, getGame, saveGame } = require('./db');
 const { PATCHES } = require('./patches');
+const { TRACK_LENGTH, BUTTON_INCOME_SPACES } = require('./timeTrack');
 
 const PORT = process.env.PORT || 3000;
 const PUBLIC_DIR = path.join(__dirname, 'web', 'dist');
@@ -151,13 +152,16 @@ const server = http.createServer(async (req, res) => {
   const { pathname } = url;
 
   // GET /api/patches -> the 33 real patches' shape/cost/time/income data,
-  // for display only (the picker's icons, cost/time labels, the
-  // hover/rotate preview) - never for legality, which always comes from
-  // a game's own /actions domain. Serves patches.js's PATCHES directly
-  // (pivot already computed at module load - see patches.js) so the
-  // client never hand-maintains its own copy of this reference data.
+  // plus the shared time-track's length and button-income space
+  // positions - everything display-only that the client would otherwise
+  // have to hand-duplicate (the picker's icons, cost/time labels, the
+  // hover/rotate preview, the time-track visualization). Never used for
+  // legality, which always comes from a game's own /actions domain.
+  // Serves patches.js/timeTrack.js's data directly (pivot already
+  // computed at module load - see patches.js) so the client never
+  // maintains its own copy of this reference data.
   if (pathname === '/api/patches' && req.method === 'GET') {
-    sendJSON(res, 200, { patches: PATCHES });
+    sendJSON(res, 200, { patches: PATCHES, trackLength: TRACK_LENGTH, buttonIncomeSpaces: BUTTON_INCOME_SPACES });
     return;
   }
 

@@ -6,7 +6,7 @@ import RotateControl from './components/RotateControl.jsx';
 import LobbyStatus from './components/LobbyStatus.jsx';
 import InvitePanel from './components/InvitePanel.jsx';
 import Controls from './components/Controls.jsx';
-import { loadPatches, rotatePatch } from './data/patches.js';
+import { loadPatches, loadTrackInfo, rotatePatch } from './data/patches.js';
 
 const SLOTS = ['X', 'O'];
 
@@ -54,6 +54,7 @@ export default function App() {
   const [gameId, setGameId] = useState(null);
   const [mode, setMode] = useState('local');
   const [patches, setPatches] = useState([]);
+  const [trackInfo, setTrackInfo] = useState({ trackLength: 0, buttonIncomeSpaces: [] });
   const [playerId, setPlayerId] = useState(null);
   const [mySlot, setMySlot] = useState(null);
   const [gameState, setGameState] = useState(null);
@@ -296,6 +297,7 @@ export default function App() {
     if (initedRef.current) return;
     initedRef.current = true;
     loadPatches().then(setPatches);
+    loadTrackInfo().then(setTrackInfo);
     const params = new URLSearchParams(window.location.search);
     const existingId = params.get('game');
     if (existingId) {
@@ -385,14 +387,19 @@ export default function App() {
         Advance Time Token
       </button>
       <RotateControl rotation={rotation} onRotate={rotateSelected} disabled={!selectedPatchId} />
-      <div className="button-status">
-        <span>X Money: {gameState.playerMoney['X']}</span>
+      <div className="money-row">
+        {SLOTS.map((slot) => (
+          <div key={slot} className={['money-pill', slot === gameState.currentPlayer && 'is-turn'].filter(Boolean).join(' ')}>
+            <span className="money-pill-slot">{slot}</span>
+            <span className="money-pill-amount">{gameState.playerMoney[slot]}</span>
+          </div>
+        ))}
       </div>
-      
-      <div className="button-status">
-        <span>O Money: {gameState.playerMoney['O']}</span>
-      </div>
-      <TimeTrack playerTimePositions={gameState.timeTrackPositions} />
+      <TimeTrack
+        playerTimePositions={gameState.timeTrackPositions}
+        trackLength={trackInfo.trackLength}
+        buttonIncomeSpaces={trackInfo.buttonIncomeSpaces}
+      />
       <PatchPicker
         patches={patches}
         availablePatches={gameState.availablePatches}

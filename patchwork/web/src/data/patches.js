@@ -1,23 +1,35 @@
-// Patch shape/cost/time/income data now comes from the server
-// (GET /api/patches, serving patchwork/patches.js's PATCHES directly -
-// pivot included, already computed there) instead of a hand-maintained
-// client-side duplicate. That duplicate existed only because of this
-// repo's "no shared build step across folders" convention (CLAUDE.md),
-// and it drifted out of sync with the real values more than once - see
-// docs/patchwork-next-steps.md. Fetching it at runtime keeps the server
-// as the one source of truth without sharing any build/import step
-// across the server/web npm projects. Still display-only, same as
-// before: never used for legality, which always comes from a game's own
-// /actions domain (see docs/architecture.md, "Client Authority: Zero").
-let patchesPromise = null;
+// Patch shape/cost/time/income data, plus the shared time-track's
+// length and button-income space positions, now come from the server
+// (GET /api/patches - serves patchwork/patches.js's PATCHES and
+// patchwork/timeTrack.js's TRACK_LENGTH/BUTTON_INCOME_SPACES directly,
+// pivot included) instead of hand-maintained client-side duplicates.
+// Those duplicates existed only because of this repo's "no shared build
+// step across folders" convention (CLAUDE.md), and drifted out of sync
+// with the real values more than once - see docs/patchwork-next-steps.md.
+// Fetching at runtime keeps the server as the one source of truth
+// without sharing any build/import step across the server/web npm
+// projects. Still display-only, same as before: never used for
+// legality, which always comes from a game's own /actions domain (see
+// docs/architecture.md, "Client Authority: Zero").
+let dataPromise = null;
+
+function loadData() {
+  if (!dataPromise) {
+    dataPromise = fetch('/api/patches').then((res) => res.json());
+  }
+  return dataPromise;
+}
 
 export function loadPatches() {
-  if (!patchesPromise) {
-    patchesPromise = fetch('/api/patches')
-      .then((res) => res.json())
-      .then((data) => data.patches || []);
-  }
-  return patchesPromise;
+  return loadData().then((data) => data.patches || []);
+}
+
+// { trackLength, buttonIncomeSpaces } - see TimeTrack.jsx.
+export function loadTrackInfo() {
+  return loadData().then((data) => ({
+    trackLength: data.trackLength,
+    buttonIncomeSpaces: data.buttonIncomeSpaces || [],
+  }));
 }
 
 // Same rotation formula as patches.js: 90deg clockwise per step,
