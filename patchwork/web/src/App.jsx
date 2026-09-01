@@ -341,7 +341,15 @@ export default function App() {
   }
 
   const canAct = legalActions.some((a) => a.type === 'selectPatch');
-  const interactiveSlot = canAct ? gameState.currentPlayer : null;  
+  const interactiveSlot = canAct ? gameState.currentPlayer : null;
+  // The slot this browser controls right now: in multiplayer that's the
+  // fixed identity from the invite token (mySlot, null until joined -
+  // never anyone else's turn to act as); in local pass-and-play there's
+  // no per-slot identity at all, so it's whoever's turn it currently is.
+  // Every consumer that used to branch on `mode === 'multiplayer'` to
+  // choose between `mySlot` and `gameState.currentPlayer` reads this
+  // instead, so that branch is only ever written once.
+  const activeSlot = mode === 'multiplayer' ? mySlot : gameState.currentPlayer;
   const highlighted = new Set(highlightedCells.map(([row, col]) => `${row},${col}`));
   const statusText = gameState.status === 'lobby'
     ? 'Waiting for another player to join… share the link!'
@@ -364,7 +372,7 @@ export default function App() {
           <QuiltBoard
             key={slot}
             slot={slot}
-            label={mode === 'multiplayer' ? (slot === mySlot ? 'Your board' : "Opponent's board") : `Player ${slot}`}
+            label={mode === 'multiplayer' ? (slot === activeSlot ? 'Your board' : "Opponent's board") : `Player ${slot}`}
             board={gameState.quiltBoards[slot]}
             interactive={slot === interactiveSlot && !!selectedPatchId}
             highlighted={highlighted}
@@ -373,7 +381,7 @@ export default function App() {
           />
         ))}
       </div>
-      <button onClick={advanceTimeToken} disabled={mode === 'multiplayer' && mySlot !== gameState.currentPlayer}>
+      <button onClick={advanceTimeToken} disabled={activeSlot !== gameState.currentPlayer}>
         Advance Time Token
       </button>
       <RotateControl rotation={rotation} onRotate={rotateSelected} disabled={!selectedPatchId} />
@@ -388,7 +396,7 @@ export default function App() {
       <PatchPicker
         patches={patches}
         availablePatches={gameState.availablePatches}
-        playerMoney={mode === 'multiplayer' ? gameState.playerMoney[mySlot] : gameState.playerMoney[gameState.currentPlayer]}
+        playerMoney={gameState.playerMoney[activeSlot]}
         selectedPatchId={selectedPatchId}
         onSelect={selectPatch}
         disabled={!canAct}
