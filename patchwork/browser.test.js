@@ -64,7 +64,7 @@ async function pickFirstAvailablePatch(page) {
 // a patch, so placing one now means hovering a board cell first. The
 // board center is empty on a fresh game, so it's a safe hover target
 // for (almost) any patch shape/rotation.
-async function hoverBoardCenter(page, slot = 'X') {
+async function hoverBoardCenter(page, slot = 0) {
   const cell = page.locator(`#quiltBoard-${slot} .quilt-cell`).nth(4 * 9 + 4); // row 4, col 4
   await cell.hover();
   return cell;
@@ -84,7 +84,7 @@ test('browser end-to-end', async (t) => {
       const page = await browser.newPage();
       await page.goto(BASE);
       await page.locator('#newLocalGameBtn').click();
-      await waitFor(async () => (await page.locator('#status').textContent()) === 'Player X turn — pick a patch below');
+      await waitFor(async () => (await page.locator('#status').textContent()) === 'Player 1 turn — pick a patch below');
 
       const patchId = await pickFirstAvailablePatch(page);
       await waitFor(async () => (await page.locator('#rotateBtn').textContent()) === 'Rotate (0°)');
@@ -94,14 +94,15 @@ test('browser end-to-end', async (t) => {
       // Hovering the board previews the placement (a highlighted
       // footprint); clicking that same cell places it.
       const cell = await hoverBoardCenter(page);
-      await page.locator('#quiltBoard-X .quilt-cell.highlight').first().waitFor();
+      await page.locator('#quiltBoard-0 .quilt-cell.highlight').first().waitFor();
       await cell.click();
 
       await waitFor(async () => (await page.locator(`.patch-tile[data-patch-id="${patchId}"]`).isDisabled()));
-      await waitFor(async () => (await page.locator('#quiltBoard-X .quilt-cell.filled').count()) > 0);
-      // X just moved and is still ahead of O (who hasn't moved at all
-      // yet), so O - still further behind on the time track - goes next.
-      assert.equal(await page.locator('#status').textContent(), 'Player O turn — pick a patch below', "turn passes to whoever is behind on the time track");
+      await waitFor(async () => (await page.locator('#quiltBoard-0 .quilt-cell.filled').count()) > 0);
+      // Player 1 just moved and is still ahead of player 2 (who hasn't
+      // moved at all yet), so player 2 - still further behind on the
+      // time track - goes next.
+      assert.equal(await page.locator('#status').textContent(), 'Player 2 turn — pick a patch below', "turn passes to whoever is behind on the time track");
 
       await page.close();
     });
@@ -110,17 +111,17 @@ test('browser end-to-end', async (t) => {
       const page = await browser.newPage();
       await page.goto(BASE);
       await page.locator('#newLocalGameBtn').click();
-      await waitFor(async () => (await page.locator('#status').textContent()) === 'Player X turn — pick a patch below');
+      await waitFor(async () => (await page.locator('#status').textContent()) === 'Player 1 turn — pick a patch below');
 
-      const patchId = await pickFirstAvailablePatch(page); // X's turn - X's board is active, O's is not
-      const oCell = page.locator('#quiltBoard-O .quilt-cell').nth(4 * 9 + 4);
-      await oCell.hover();
+      const patchId = await pickFirstAvailablePatch(page); // player 1's turn - their board is active, player 2's is not
+      const otherCell = page.locator('#quiltBoard-1 .quilt-cell').nth(4 * 9 + 4);
+      await otherCell.hover();
 
       // No highlight anywhere - not on the hovered (inactive) board, and
       // not leaked onto the active board either.
       assert.equal(await page.locator('.quilt-cell.highlight').count(), 0);
 
-      await oCell.click();
+      await otherCell.click();
       // Nothing placed anywhere, and the selection is untouched (still
       // mid-placement on the same patch) - a proxy for "no
       // state-changing POST happened".
@@ -135,33 +136,33 @@ test('browser end-to-end', async (t) => {
       const hostPage = await hostCtx.newPage();
       await hostPage.goto(BASE);
       await hostPage.locator('#newMultiplayerGameBtn').click();
-      await waitForRole(hostPage, 'You are X');
+      await waitForRole(hostPage, 'You are Player 1');
 
       const inviteLink = await hostPage.locator('#inviteLinkInput').inputValue();
 
       const guestCtx = await browser.newContext();
       const guestPage = await guestCtx.newPage();
       await guestPage.goto(inviteLink);
-      await waitForRole(guestPage, 'You are O');
+      await waitForRole(guestPage, 'You are Player 2');
 
-      await waitFor(async () => (await hostPage.locator('#status').textContent()) === 'Player X turn — pick a patch below');
+      await waitFor(async () => (await hostPage.locator('#status').textContent()) === 'Player 1 turn — pick a patch below');
       assert.equal(await guestPage.locator('#status').textContent(), 'Waiting for the other player…');
 
       const patchId = await pickFirstAvailablePatch(hostPage);
       const cell = await hoverBoardCenter(hostPage);
-      await hostPage.locator('#quiltBoard-X .quilt-cell.highlight').first().waitFor();
+      await hostPage.locator('#quiltBoard-0 .quilt-cell.highlight').first().waitFor();
       await cell.click();
 
       // Guest's view updates live: it's now their turn (still behind on
       // the time track), and the placed patch is greyed out on their
       // picker too (shared pool).
-      await waitFor(async () => (await guestPage.locator('#status').textContent()) === 'Player O turn — pick a patch below');
+      await waitFor(async () => (await guestPage.locator('#status').textContent()) === 'Player 2 turn — pick a patch below');
       await waitFor(async () => await guestPage.locator(`.patch-tile[data-patch-id="${patchId}"]`).isDisabled());
       await waitFor(async () => (await hostPage.locator('#status').textContent()) === 'Waiting for the other player…');
 
       // And the host's own placement is visible on the *opponent's*
       // board from the guest's point of view.
-      await waitFor(async () => (await guestPage.locator("#quiltBoard-X .quilt-cell.filled").count()) > 0);
+      await waitFor(async () => (await guestPage.locator("#quiltBoard-0 .quilt-cell.filled").count()) > 0);
 
       await hostCtx.close();
       await guestCtx.close();

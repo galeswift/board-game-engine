@@ -229,11 +229,11 @@ h1 {
   border: 2px solid #0f172a;
 }
 
-.time-track-marker.slot-x {
+.time-track-marker.slot-0 {
   background: #60a5fa;
 }
 
-.time-track-marker.slot-o {
+.time-track-marker.slot-1 {
   background: #fbbf24;
 }
 

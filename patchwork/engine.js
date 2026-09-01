@@ -22,11 +22,11 @@ function emptyBoard() {
 
 function createGame({ mode = 'local' } = {}) {
   return {
-    quiltBoards: { X: emptyBoard(), O: emptyBoard() },
+    quiltBoards: { 0: emptyBoard(), 1: emptyBoard() },
     availablePatches: PATCHES.map((p) => p.id),
-    currentPlayer: 'X',
-    timeTrackPositions: { X: 0, O: 0 },
-    playerMoney: { X: 5, O: 5 },
+    currentPlayer: 0,
+    timeTrackPositions: { 0: 0, 1: 0 },
+    playerMoney: { 0: 5, 1: 5 },
     // 'lobby' | 'in-progress' | 'complete'. 'complete' once every patch
     // has been placed - no winner/scoring here, just nothing left to do.
     status: mode === 'multiplayer' ? 'lobby' : 'in-progress',
@@ -177,17 +177,17 @@ function calculateGlobalBoardIncome(state, nextBoard, nextTimeTrackPositions) {
 }
 
 function otherPlayer(player) {
-  return player === 'X' ? 'O' : 'X';
+  return player === 0 ? 1 : 0;
 }
 
-function nextPlayerFrom(timeTrackPositions, currentPlayer) { 
-  if ( timeTrackPositions.X == timeTrackPositions.O )
+function nextPlayerFrom(timeTrackPositions, currentPlayer) {
+  if ( timeTrackPositions[0] == timeTrackPositions[1] )
   {
       return currentPlayer;
   }
   else
   {
-      return timeTrackPositions.X < timeTrackPositions.O ? 'X' : 'O';
+      return timeTrackPositions[0] < timeTrackPositions[1] ? 0 : 1;
   }
 }
 

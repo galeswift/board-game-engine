@@ -117,7 +117,7 @@ test('WebSocket live channel', async (t) => {
 
       for (const message of [messageA, messageB]) {
         assert.equal(message.type, 'state');
-        assert.equal(message.state.quiltBoards.X[0], 'patch-01');
+        assert.equal(message.state.quiltBoards[0][0], 'patch-01');
       }
 
       socketA.close();
@@ -151,42 +151,43 @@ test('WebSocket live channel', async (t) => {
 
     await t.test('authenticating scopes each socket\'s state push to its own slot', async () => {
       const { gameId, invites } = await createMultiplayerGame();
-      const x = await join(gameId, tokenFor(invites, 'X'));
-      const o = await join(gameId, tokenFor(invites, 'O')); // now in-progress, X's turn
+      const p1 = await join(gameId, tokenFor(invites, 0));
+      const p2 = await join(gameId, tokenFor(invites, 1)); // now in-progress, player 0's turn
 
-      const socketX = await connectAndAuthenticate(gameId, x.playerId);
-      const socketO = await connectAndAuthenticate(gameId, o.playerId);
+      const socketP1 = await connectAndAuthenticate(gameId, p1.playerId);
+      const socketP2 = await connectAndAuthenticate(gameId, p2.playerId);
 
-      const [messageX, messageO] = await Promise.all([
-        waitForMessage(socketX),
-        waitForMessage(socketO),
-        placePatch(gameId, x.playerId),
+      const [messageP1, messageP2] = await Promise.all([
+        waitForMessage(socketP1),
+        waitForMessage(socketP2),
+        placePatch(gameId, p1.playerId),
       ]);
 
-      assert.deepEqual(messageX.actions, [], "not X's turn anymore");
-      // O still has all 5 starting buttons, so O's affordable-patch count
-      // is a fresh game's minus the one X just took (see server.test.js's
-      // AFFORDABLE_PATCH_IDS for where 24 comes from: patches costing <= 5).
-      assert.equal(messageO.actions[0]?.params.patchId.domain.length, 23, "it's now O's turn, one patch already taken");
-      assert.deepEqual(messageX.lobby, { X: { claimed: true }, O: { claimed: true } }, 'the push includes a live lobby summary too');
+      assert.deepEqual(messageP1.actions, [], "not player 0's turn anymore");
+      // Player 1 still has all 5 starting buttons, so their
+      // affordable-patch count is a fresh game's minus the one player 0
+      // just took (see server.test.js's AFFORDABLE_PATCH_IDS for where 24
+      // comes from: patches costing <= 5).
+      assert.equal(messageP2.actions[0]?.params.patchId.domain.length, 23, "it's now player 1's turn, one patch already taken");
+      assert.deepEqual(messageP1.lobby, { 0: { claimed: true }, 1: { claimed: true } }, 'the push includes a live lobby summary too');
 
-      socketX.close();
-      socketO.close();
+      socketP1.close();
+      socketP2.close();
     });
 
     await t.test('closing a bound socket broadcasts a presence update to others', async () => {
       const { gameId, invites } = await createMultiplayerGame();
-      const x = await join(gameId, tokenFor(invites, 'X'));
-      const o = await join(gameId, tokenFor(invites, 'O'));
+      const p1 = await join(gameId, tokenFor(invites, 0));
+      const p2 = await join(gameId, tokenFor(invites, 1));
 
-      const socketX = await connectAndAuthenticate(gameId, x.playerId);
-      const socketO = await connectAndAuthenticate(gameId, o.playerId);
+      const socketP1 = await connectAndAuthenticate(gameId, p1.playerId);
+      const socketP2 = await connectAndAuthenticate(gameId, p2.playerId);
 
-      const presence = waitForMessage(socketO);
-      socketX.close();
+      const presence = waitForMessage(socketP2);
+      socketP1.close();
 
-      assert.deepEqual(await presence, { type: 'presence', slot: 'X', connected: false });
-      socketO.close();
+      assert.deepEqual(await presence, { type: 'presence', slot: 0, connected: false });
+      socketP2.close();
     });
   } finally {
     child.kill();

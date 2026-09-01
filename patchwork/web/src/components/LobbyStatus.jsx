@@ -1,11 +1,15 @@
+const SLOTS = [0, 1];
+
 export default function LobbyStatus({ mode, lobby, mySlot, gameState }) {
   if (mode !== 'multiplayer' || !lobby) return null;
 
   return (
     <div id="lobbyStatus" className="lobby-status">
-      <p id="myRole" className="my-role">{mySlot ? `You are ${mySlot}` : 'Spectating'}</p>
+      {/* mySlot is a 0-based index and can legitimately be 0 (falsy) -
+          check against null explicitly, not truthiness. */}
+      <p id="myRole" className="my-role">{mySlot !== null ? `You are Player ${mySlot + 1}` : 'Spectating'}</p>
       <ul id="playerList" className="player-list">
-        {['X', 'O'].map((slot) => {
+        {SLOTS.map((slot) => {
           const claimed = lobby[slot].claimed;
           const isTurn = gameState.status === 'in-progress' && gameState.currentPlayer === slot;
           const detail = !claimed
@@ -17,7 +21,7 @@ export default function LobbyStatus({ mode, lobby, mySlot, gameState }) {
               key={slot}
               className={[slot === mySlot && 'is-you', isTurn && 'is-turn'].filter(Boolean).join(' ')}
             >
-              <span>{slot}{slot === mySlot ? ' (you)' : ''}</span>
+              <span>Player {slot + 1}{slot === mySlot ? ' (you)' : ''}</span>
               <span>{detail}</span>
             </li>
           );

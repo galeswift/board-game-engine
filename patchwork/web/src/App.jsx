@@ -8,7 +8,7 @@ import InvitePanel from './components/InvitePanel.jsx';
 import Controls from './components/Controls.jsx';
 import { loadPatches, loadTrackInfo, rotatePatch } from './data/patches.js';
 
-const SLOTS = ['X', 'O'];
+const SLOTS = [0, 1];
 
 function inviteLinkFor(id, token) {
   const link = new URL(`${window.location.origin}${window.location.pathname}`);
@@ -106,8 +106,8 @@ export default function App() {
     let newInviteLink = '';
 
     if (newMode === 'multiplayer') {
-      const ownInvite = data.invites.find((i) => i.slot === 'X');
-      const opponentInvite = data.invites.find((i) => i.slot === 'O');
+      const ownInvite = data.invites.find((i) => i.slot === 0);
+      const opponentInvite = data.invites.find((i) => i.slot === 1);
       const joined = await joinLobbyRequest(gid, ownInvite.token);
       if (joined) {
         newPlayerId = joined.playerId;
@@ -361,7 +361,7 @@ export default function App() {
         ? "Waiting for the other player…"
         : selectedPatchId
           ? `Choose where to place ${selectedPatchId} on your board`
-          : `Player ${gameState.currentPlayer} turn — pick a patch below`;
+          : `Player ${gameState.currentPlayer + 1} turn — pick a patch below`;
   return (
     <main className="patchwork-app">
       <h1>Patchwork</h1>
@@ -374,7 +374,7 @@ export default function App() {
           <QuiltBoard
             key={slot}
             slot={slot}
-            label={mode === 'multiplayer' ? (slot === activeSlot ? 'Your board' : "Opponent's board") : `Player ${slot}`}
+            label={mode === 'multiplayer' ? (slot === activeSlot ? 'Your board' : "Opponent's board") : `Player ${slot + 1}`}
             board={gameState.quiltBoards[slot]}
             interactive={slot === interactiveSlot && !!selectedPatchId}
             highlighted={highlighted}
@@ -390,7 +390,7 @@ export default function App() {
       <div className="money-row">
         {SLOTS.map((slot) => (
           <div key={slot} className={['money-pill', slot === gameState.currentPlayer && 'is-turn'].filter(Boolean).join(' ')}>
-            <span className="money-pill-slot">{slot}</span>
+            <span className="money-pill-slot">P{slot + 1}</span>
             <span className="money-pill-amount">{gameState.playerMoney[slot]}</span>
           </div>
         ))}

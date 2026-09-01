@@ -22,7 +22,7 @@ const { TRACK_LENGTH, BUTTON_INCOME_SPACES } = require('./timeTrack');
 
 const PORT = process.env.PORT || 3000;
 const PUBLIC_DIR = path.join(__dirname, 'web', 'dist');
-const SLOTS = ['X', 'O'];
+const SLOTS = [0, 1];
 
 // Runtime-only: live WebSocket connections per game, keyed by gameId.
 // Never persisted (a socket can't be serialized) and not affected by a
@@ -36,7 +36,9 @@ const socketsByGame = new Map();
 // playerId to "whose move is this."
 function slotForPlayerId(lobby, playerId) {
   if (!lobby || !playerId) return null;
-  return SLOTS.find((slot) => lobby[slot].playerId === playerId) || null;
+  // ?? not || - a slot's index can legitimately be 0, which is falsy but
+  // still a real, found slot (not "not found").
+  return SLOTS.find((slot) => lobby[slot].playerId === playerId) ?? null;
 }
 
 // A slot's invite token, or null. Each slot's token is generated once at
@@ -45,7 +47,7 @@ function slotForPlayerId(lobby, playerId) {
 // the join handler below).
 function slotForToken(lobby, token) {
   if (!lobby || !token) return null;
-  return SLOTS.find((slot) => lobby[slot].token === token) || null;
+  return SLOTS.find((slot) => lobby[slot].token === token) ?? null;
 }
 
 // Redacted lobby view for a multiplayer game: claimed/open per slot,
@@ -55,10 +57,7 @@ function slotForToken(lobby, token) {
 // token, its own or anyone else's.
 function lobbySummary(record) {
   if (record.mode !== 'multiplayer') return undefined;
-  return {
-    X: { claimed: record.lobby.X.playerId !== null },
-    O: { claimed: record.lobby.O.playerId !== null },
-  };
+  return Object.fromEntries(SLOTS.map((slot) => [slot, { claimed: record.lobby[slot].playerId !== null }]));
 }
 
 // The legal-actions list a specific caller is allowed to see. Local
@@ -71,7 +70,7 @@ function scopedActions(record, playerId, selection) {
   const actions = queryLegalActions(record.state, selection);
   if (record.mode !== 'multiplayer') return actions;
   const slot = slotForPlayerId(record.lobby, playerId);
-  return slot && slot === record.state.currentPlayer ? actions : [];
+  return slot !== null && slot === record.state.currentPlayer ? actions : [];
 }
 
 const MIME_TYPES = {
@@ -178,10 +177,7 @@ const server = http.createServer(async (req, res) => {
     const id = crypto.randomBytes(4).toString('hex');
     const state = createGame({ mode });
     const lobby = mode === 'multiplayer'
-      ? {
-        X: { playerId: null, token: crypto.randomBytes(12).toString('hex') },
-        O: { playerId: null, token: crypto.randomBytes(12).toString('hex') },
-      }
+      ? Object.fromEntries(SLOTS.map((slot) => [slot, { playerId: null, token: crypto.randomBytes(12).toString('hex') }]))
       : null;
     await insertGame(id, mode, state, lobby);
     if (mode === 'multiplayer') {
@@ -199,7 +195,7 @@ const server = http.createServer(async (req, res) => {
 
   // GET /api/games/:id -> fetch current state. For multiplayer games,
   // includes a redacted lobby summary (claimed/open per slot) so a UI
-  // can show "waiting for player O" - never the tokens themselves.
+  // can show "waiting for player 2" - never the tokens themselves.
   const gameMatch = pathname.match(/^\/api\/games\/([a-zA-Z0-9]+)$/);
   if (gameMatch && req.method === 'GET') {
     const record = await getGame(gameMatch[1]);
@@ -229,7 +225,7 @@ const server = http.createServer(async (req, res) => {
     }
 
     const slot = slotForToken(record.lobby, body.inviteToken);
-    if (!slot) return sendJSON(res, 400, { error: 'invalid-invite' });
+    if (slot === null) return sendJSON(res, 400, { error: 'invalid-invite' });
 
     const existingPlayerId = record.lobby[slot].playerId;
     if (existingPlayerId) {
@@ -284,7 +280,7 @@ const server = http.createServer(async (req, res) => {
       const action = await readJsonBody(req);
       if (record.mode === 'multiplayer') {
         const slot = slotForPlayerId(record.lobby, action.playerId);
-        if (!slot) {
+        if (slot === null) {
           return sendJSON(res, 400, { gameId: id, state: record.state, error: 'invalid-player' });
         }
         if (slot !== record.state.currentPlayer) {
@@ -374,7 +370,7 @@ wss.on('connection', (socket, gameId, lobby) => {
     }
     if (message.type !== 'authenticate') return;
     const slot = slotForPlayerId(lobby, message.playerId);
-    if (!slot) return; // unrecognized playerId - stays an unauthenticated/spectator socket
+    if (slot === null) return; // unrecognized playerId - stays an unauthenticated/spectator socket
     socket.playerId = message.playerId;
     broadcastPresence(gameId, slot, true, socket);
   });
@@ -382,7 +378,7 @@ wss.on('connection', (socket, gameId, lobby) => {
   socket.on('close', () => {
     sockets.delete(socket);
     const slot = slotForPlayerId(lobby, socket.playerId);
-    if (slot) broadcastPresence(gameId, slot, false, socket);
+    if (slot !== null) broadcastPresence(gameId, slot, false, socket);
   });
 });
 

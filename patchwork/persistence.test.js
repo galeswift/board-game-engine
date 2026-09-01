@@ -65,7 +65,7 @@ test('game state survives a server restart', async () => {
     const res = await fetch(`${BASE}/api/games/${gameId}`);
     assert.equal(res.status, 200, 'the game is still there after the process restarted');
     const { state } = await res.json();
-    assert.equal(state.quiltBoards.X[0], 'patch-01', 'the move made before the restart is still there');
+    assert.equal(state.quiltBoards[0][0], 'patch-01', 'the move made before the restart is still there');
   } finally {
     child.kill();
   }
