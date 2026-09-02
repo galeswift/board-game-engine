@@ -405,6 +405,7 @@ export default function App() {
   // recompute this from gameState.availablePatches (the whole
   // remaining circle) itself.
   const pickableDomain = legalActions.find((a) => a.type === 'selectPatch')?.params.patchId.domain ?? [];
+  const affordableDomain = legalActions.find((a) => a.type === 'selectPatch')?.params.patchId.domain ?? [];
   const interactiveSlot = canAct ? gameState.currentPlayer : null;
   // The slot this browser controls right now: in multiplayer that's the
   // fixed identity from the invite token (mySlot, null until joined -
@@ -415,6 +416,7 @@ export default function App() {
   // instead, so that branch is only ever written once.
   const activeSlot = mode === 'multiplayer' ? mySlot : gameState.currentPlayer;
   const highlighted = new Set(highlightedCells.map(([row, col]) => `${row},${col}`));
+  const drawGameplayElements = mode !== 'multiplayer' || gameState.phase !== 'lobby';
   const statusText = gameState.phase === 'lobby'
     ? 'Waiting for another player to join… share the link!'
     : gameState.phase === 'complete'
@@ -424,6 +426,13 @@ export default function App() {
         : selectedPatchId
           ? `Choose where to place ${selectedPatchId} on your board`
           : `Player ${gameState.currentPlayer + 1} turn — pick a patch below`;
+  
+  let patchCircle = [];
+  gameState.availablePatches.forEach((patch) => {
+    patchCircle.push(patchesById.get(patch));
+  });
+
+  console.log("Patch circle is "+JSON.stringify(patchCircle)+", neutral token at "+gameState.neutralTokenIndex);
   return (
     <main className="patchwork-app">
       <h1>Patchwork</h1>
@@ -431,37 +440,42 @@ export default function App() {
 
       <LobbyStatus mode={mode} lobby={lobby} mySlot={mySlot} gameState={gameState} />
 
-      <div className="quilt-boards">
-        {SLOTS.map((slot) => (
-          <QuiltBoard
-            key={slot}
-            slot={slot}
-            label={mode === 'multiplayer' ? (slot === activeSlot ? 'Your board' : "Opponent's board") : `Player ${slot + 1}`}
-            board={gameState.quiltBoards[slot]}
-            interactive={slot === interactiveSlot && !!selectedPatchId}
-            highlighted={highlighted}
-            onCellClick={placeSelectedPatch}
-            onUpdateHighlights={updateHighlights}
-          />
-        ))}
-      </div>
-      <button onClick={advanceTimeToken} disabled={activeSlot !== gameState.currentPlayer}>
-        Advance Time Token
-      </button>
-      <RotateControl rotation={rotation} onRotate={rotateSelected} disabled={!selectedPatchId} />
-      <MoneyStatus gameState={gameState} slots={SLOTS} />
-      <TimeTrack
-        playerTimePositions={gameState.timeTrackPositions}
-        trackLength={trackInfo.trackLength}
-        buttonIncomeSpaces={trackInfo.buttonIncomeSpaces}
-      />
-      <PatchPicker
-        patches={patches}
-        pickableDomain={pickableDomain}
-        selectedPatchId={selectedPatchId}
-        onSelect={selectPatch}
-        disabled={!canAct}
-      />
+      {drawGameplayElements && 
+          <>
+          <div className="quilt-boards">
+            {SLOTS.map((slot) => (
+              <QuiltBoard
+                key={slot}
+                slot={slot}
+                label={mode === 'multiplayer' ? (slot === activeSlot ? 'Your board' : "Opponent's board") : `Player ${slot + 1}`}
+                board={gameState.quiltBoards[slot]}
+                interactive={slot === interactiveSlot && !!selectedPatchId}
+                highlighted={highlighted}
+                onCellClick={placeSelectedPatch}
+                onUpdateHighlights={updateHighlights}
+              />
+            ))}
+          </div>
+          <button onClick={advanceTimeToken} disabled={activeSlot !== gameState.currentPlayer}>
+            Advance Time Token
+          </button>
+          <RotateControl rotation={rotation} onRotate={rotateSelected} disabled={!selectedPatchId} />
+          <MoneyStatus gameState={gameState} slots={SLOTS} />
+          <TimeTrack
+            playerTimePositions={gameState.timeTrackPositions}
+            trackLength={trackInfo.trackLength}
+            buttonIncomeSpaces={trackInfo.buttonIncomeSpaces}
+          />      
+          <PatchPicker
+            patches={patchCircle}
+            neutralTokenIndex={gameState.neutralTokenIndex}
+            pickableDomain={pickableDomain}
+            affordableDomain={affordableDomain}
+            selectedPatchId={selectedPatchId}
+            onSelect={selectPatch}
+            disabled={!canAct} />          
+          </>
+       }
 
       <Controls
         onNewLocal={() => createGame('local')}

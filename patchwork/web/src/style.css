@@ -154,7 +154,17 @@ h1 {
 }
 
 .patch-tile:disabled {
-  opacity: 0.3;
+  opacity: 0.1;
+}
+
+.patch-tile.marked {
+  border:3px solid #60a5fa;
+  opacity: .5;
+}
+
+.patch-tile.pickable {
+  border:3px solid white;
+  opacity: 1;
 }
 
 .money-row {

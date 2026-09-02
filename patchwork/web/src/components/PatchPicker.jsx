@@ -12,18 +12,19 @@ import PatchShape from './PatchShape.jsx';
 // Zero". `patches` comes from the server (App.jsx's loadPatches())
 // rather than a static import, so it starts empty until that fetch
 // resolves - renders no tiles yet rather than erroring.
-export default function PatchPicker({ patches, pickableDomain, selectedPatchId, onSelect, disabled }) {
+export default function PatchPicker({ patches, neutralTokenIndex, pickableDomain, selectedPatchId, onSelect, disabled }) {
   const pickable = new Set(pickableDomain);
 
   return (
     <div id="patchPicker" className="patch-picker">
-      {patches.map((patch) => {
+      {patches.map((patch,idx) => {
         const isPickable = pickable.has(patch.id);
         const isSelected = patch.id === selectedPatchId;
+        const isMarked = idx === neutralTokenIndex || idx === (neutralTokenIndex + 1) % patches.length || idx === (neutralTokenIndex + 2) % patches.length;
         return (
           <button
             key={patch.id}
-            className={['patch-tile', isSelected && 'selected'].filter(Boolean).join(' ')}
+            className={['patch-tile', isPickable && 'pickable', isMarked && 'marked', isSelected && 'selected'].filter(Boolean).join(' ')}
             disabled={disabled || !isPickable || isSelected}
             onClick={() => onSelect(patch.id)}
             title={patch.id}
