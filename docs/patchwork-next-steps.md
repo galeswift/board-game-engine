@@ -268,39 +268,82 @@ instead of prototyped in vanilla JS and then rewritten.
   worth doing that verification step for any future Dockerfile change
   here, since local testing structurally can't catch this class of bug.
 
-### Not started
-- **The full real Patchwork engine and UI.** Asymmetric, time-track-driven
-  turn order, per-player economy (buttons), phase transitions (setup →
-  play → scoring → game over), actual button cost to buy a patch — see
-  `docs/architecture.md` Section 12. This is where the #5 image-plugin
-  convention (`<PatchArt id>` in `web/src/`) finally gets wired in.
-  `PATCHES`' `cost`/`time`/`income` fields already exist in
-  `patchwork/patches.js` (the server-side data module), unused by the
-  engine yet - `web/src/data/patches.js`'s client-side copy deliberately
-  trimmed them out since nothing client-side needs them yet either.
+### Done (2026-09-01/02 session — rules-engine-core retrofit)
 
-- **Retrofit `patchwork/engine.js` onto the generic phases/transitions
-  design from `docs/architecture.md` §6-11** (`defineGame({ phases:
-  {...} })`, the shared `allowedActions` legality gate, transitions
-  flowing through a command/event pipeline instead of being inlined into
-  `createGame`/`startGame`/`applyAction`). This is a correction, not a
-  new feature: per §12, Patchwork was picked as the second proof-of-concept
-  specifically *to stress-test that design* ("non-alternating turn
-  order," "phases that matter" are listed as the reasons it was chosen
-  over just extending tic-tac-toe). What actually got built (2026-08-31
-  session) is a hand-rolled `phase: 'lobby'|'play'|'complete'` string
-  with two independent inline `if (state.phase !== 'play')` checks
-  (`queryLegalActions` and `applyAction`) - it runs the lobby/setup/play
-  transition correctly, but exercises none of the actual generic
-  machinery the doc describes, so it hasn't actually validated that
-  design the way the game was chosen to do. Also still missing: a real
-  scoring phase (currently `phase` jumps straight from `'play'` to
-  `'complete'` when the circle empties, with no 7x7-bonus/empty-square
-  scoring computed) and a seeded/deterministic RNG context for the patch
-  circle shuffle (`docs/architecture.md` §3) - both would be natural
-  forcing functions for finally building this for real, especially once
-  `rules-engine-core` has a second consumer in Forbidden Island to
-  design against rather than just one game's guesses.
+- **Retrofitted `patchwork/engine.js` onto a real generic
+  phases/command/event core, `packages/rules-engine-core/`.** This was a
+  correction, not a new feature: per §12, Patchwork was picked as the
+  second proof-of-concept specifically *to stress-test* the design in
+  `docs/architecture.md` §6-11 ("non-alternating turn order," "phases
+  that matter"), but the phase work landed in the 2026-08-31 session was
+  a hand-rolled `phase` string with two inline legality checks that
+  never actually exercised that machinery. `packages/rules-engine-core/`
+  now has: `defineGame()` with registration-time validation (incl.
+  `bounds.players.min/max` enforcement), declared phases with a single
+  shared legality gate (`phases.isActionLegal`, used identically by
+  `execute()` and `queryLegalActions()`), a command/event/effect
+  dispatch loop with an implicit phase-transition-on-event rule, a
+  deterministic seeded RNG (`context.rng()`/`context.nextId()`,
+  replacing every `Math.random()` in the patch-circle shuffle),
+  `preview()` as a literal thin wrapper around `execute()`, and a real,
+  tested replay path: every successful action is logged in
+  `record.log` (not just the commands/events it produced), so
+  `extractActionLog()` can reconstruct the exact action sequence from
+  persisted data and `replay(definition, seed, players, actionLog)`
+  reproduces a byte-identical final state - proven against a real
+  Patchwork game, not just the generic fake-game fixture (see
+  `patchwork/gameDefinition.test.js`).
+
+  **Explicitly not built** (no current consumer needs them - see
+  `packages/rules-engine-core/README.md`): the `phaseRestricted: false`
+  always-legal-interrupt escape hatch, and `maxEvents`/`maxRuleDepth`
+  cycle protection (an authoring bug where a rule re-emits an event it
+  reacts to will hang the process - a real, accepted risk, revisit
+  before Forbidden Island). `transactionLimits` isn't accepted by
+  `defineGame()` at all yet, rather than accepted and silently ignored.
+
+  `patchwork/gameDefinition.js` replaces `engine.js` entirely as
+  Patchwork's actual rules, expressed as commands/rules/actions against
+  that core. Along the way, fixed a real pre-existing bug: the old
+  engine used "patch circle empty" as the game's end condition; the
+  actual rule (verified against published rules) is "both players' time
+  tokens reach the end of the track" - never surfaced before because no
+  scoring existed to expose it. Added real scoring (buttons minus 2x
+  empty squares, plus a 7-point bonus for whoever first completes a 7x7
+  area - itself a race claimed during play, not an end-of-game
+  tiebreak).
+
+  Wire contract changed as part of this (client updated to match,
+  existing Postgres rows deleted at startup rather than left to crash on
+  read - see `db.js`'s `ensureSchema`): state is now `{ meta, phase:
+  {current}, shared, players, turnOrder }` (players keyed by seat slot
+  `"0"`/`"1"`, not an application identity - `patchwork`'s multiplayer
+  `playerId` auth token stays entirely in `server.js`'s `lobby` object,
+  outside engine state, same as before), and committed actions take
+  `{ type, params }` instead of flat fields. `Dockerfile`'s build
+  context moved to the repo root so `COPY` can reach `packages/` - the
+  Railway service needs **both** its Root Directory changed to `.` and a
+  new `RAILWAY_DOCKERFILE_PATH=patchwork/Dockerfile` variable (Root
+  Directory alone isn't enough - see `patchwork/README.md`'s "Root
+  Directory / Dockerfile path" section).
+
+  Test suite: `packages/rules-engine-core/test/` (27 tests, new) plus
+  `patchwork/gameDefinition.test.js` (replaces `engine.test.js`, 25
+  tests) and shape/assertion updates across every other `*.test.js`
+  file. Also diagnosed and fixed a previously-unreproduced multiplayer
+  flake (`project_patchwork_multiplayer_flake.md`) - a rare
+  all-3-offered-patches-unaffordable shuffle - by having the test
+  helpers that need an immediate placement retry game creation with a
+  bounded attempt count until the opening offer is affordable, rather
+  than asserting and hoping.
+
+### Not started
+- **The image-plugin convention (`<PatchArt id>` in `web/src/`).** The
+  rules/economy/phases/scoring engine this was blocked on is now done
+  (see above) - `PATCHES`' `cost`/`time`/`income` fields are used by the
+  engine now, but no patch artwork exists or is wired into the picker
+  yet. See #5 in the "Done" section above (the original convention
+  design) for the plan once real art exists to plug in.
 
 ## Key decisions/constraints to carry forward
 

@@ -308,12 +308,14 @@ module.exports = defineGame({
       },
     },
 
-    // Purely descriptive - mirrors the old queryLegalActions' "here's
-    // what you could pick" hint. The client never actually commits a
-    // {type:'selectPatch'} action (a real move is always placePatch);
-    // this exists so 'selectPatch' can be a real, defineGame-validated
-    // action whose legalParams participates in the shared
-    // queryLegalActions loop the same way every other action's does.
+    // Genuinely legal, genuinely a no-op: queryLegalActions() advertises
+    // this as executable whenever no patch is selected yet, so execute()
+    // has to actually honor that rather than reject it - anything else
+    // is a real contradiction between what's advertised and what's
+    // accepted (query and execute must agree on legality). Picking a
+    // patch is otherwise pure client-side UI state (which patch is
+    // "selected" locally, before placing) - a real move is always
+    // placePatch - so committing this changes nothing.
     selectPatch: {
       legalParams(state, playerId, selection) {
         if (selection && selection.patchId) return null;
@@ -326,7 +328,7 @@ module.exports = defineGame({
         return { patchId: { domain: affordable } };
       },
       execute() {
-        return { error: 'selectPatch-is-informational-only' };
+        return { commands: [] };
       },
     },
 

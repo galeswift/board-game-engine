@@ -7,6 +7,10 @@ const { createContext, createReadOnlyContext } = require('./context');
 
 function playerSlots(definition, players) {
   const count = players && players.length ? players.length : definition.bounds.players.min;
+  const { min, max } = definition.bounds.players;
+  if (count < min || count > max) {
+    throw new Error(`rules-engine-core: ${definition.id} requires between ${min} and ${max} players, got ${count}`);
+  }
   return Array.from({ length: count }, (_, i) => i);
 }
 
@@ -18,6 +22,10 @@ function baseState(definition, seed, slots, initArgs) {
       seed,
       rngState: seed,
       idCounters: {},
+      // A monotonic counter stamped onto every successful action's log
+      // entry (see execute() below) - the architecture's "action
+      // sequence number" (docs/architecture.md Section 3).
+      actionSequence: 0,
     },
     phase: { current: definition.phases.initial },
     shared: {},
@@ -66,10 +74,27 @@ function execute(definition, record, action) {
     context,
     result.commands || []
   );
-  const finalState = context.finalize(dispatchedState);
-  const nextRecord = { state: finalState, log: [...record.log, ...deltaLog] };
+  const seq = record.state.meta.actionSequence + 1;
+  const contextFinalized = context.finalize(dispatchedState);
+  const finalState = { ...contextFinalized, meta: { ...contextFinalized.meta, actionSequence: seq } };
+  // The accepted action itself is logged too (kind: 'action'), not just
+  // the commands/events it produced - this is what makes a persisted
+  // record.log actually replayable (see extractActionLog below).
+  // "Acting player" isn't stored separately - it's derived from
+  // state.turnOrder.current at the time each action is replayed, which
+  // reconstructs identically given the same (seed, ordered actions).
+  const nextRecord = { state: finalState, log: [...record.log, { kind: 'action', seq, action }, ...deltaLog] };
   const events = deltaLog.filter((entry) => entry.kind === 'event').map((entry) => entry.event);
   return { record: nextRecord, error: null, events, effects: result.effects || [] };
+}
+
+// extractActionLog(log) -> Action[]
+// Reconstructs the ordered action sequence replay() needs from a
+// persisted record.log (which also contains the command/event entries
+// each action produced) - the log already IS the source of truth for
+// replay, there's no separate action-log field to keep in sync.
+function extractActionLog(log) {
+  return log.filter((entry) => entry.kind === 'action').map((entry) => entry.action);
 }
 
 // preview(definition, record, action) -> { state, error, events }
@@ -120,4 +145,4 @@ function replay(definition, seed, players, actionLog) {
   return record;
 }
 
-module.exports = { createGame, execute, preview, queryLegalActions, replay };
+module.exports = { createGame, execute, preview, queryLegalActions, replay, extractActionLog };

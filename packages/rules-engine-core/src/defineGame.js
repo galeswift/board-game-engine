@@ -25,8 +25,14 @@ function defineGame(config) {
     actions = {},
     commands = {},
     rules = [],
-    transactionLimits,
   } = config;
+  // Not accepted here: transactionLimits, phaseRestricted, and
+  // maxEvents/maxRuleDepth cycle protection - all real pieces of
+  // docs/architecture.md's target design, deliberately not built yet
+  // (nothing in Patchwork exercises them, per the retrofit's scope
+  // decision - see docs/patchwork-next-steps.md). Accepting and
+  // silently ignoring a config field is worse than rejecting it
+  // outright, so this is left unrecognized rather than stored-but-unused.
 
   if (typeof id !== 'string' || !id) {
     throw new Error('defineGame: "id" is required');
@@ -90,7 +96,6 @@ function defineGame(config) {
     actions,
     commandReducers,
     rulesByEvent,
-    transactionLimits,
   });
 }
 

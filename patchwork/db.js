@@ -43,10 +43,18 @@ async function ensureSchema() {
   }
   // Self-heals a `games` table that predates the `log` column (this
   // migration's own local Postgres, and the live Railway deploy, both
-  // already have the table from before this column existed) - existing
-  // rows are disposable prototype data (docs/patchwork-next-steps.md's
-  // retrofit entry, "clean break" decision), so no backfill needed.
+  // already have the table from before this column existed).
   await pool.query(`ALTER TABLE games ADD COLUMN IF NOT EXISTS log JSONB NOT NULL DEFAULT '[]'`);
+  // The rules-engine-core retrofit changed `state`'s own shape (flat
+  // fields -> { meta, phase, shared, players, turnOrder }) - a pre-
+  // migration row has no `meta` key at all. docs/patchwork-next-steps.md's
+  // "clean break" decision said these rows are disposable prototype
+  // data; this is what actually disposes of them, rather than leaving
+  // them to throw on first read (toWireState reads state.meta.*
+  // unconditionally). Runs on every startup - a no-op once no
+  // old-shaped rows remain, same self-healing pattern as the ALTER
+  // above.
+  await pool.query(`DELETE FROM games WHERE NOT (state ? 'meta')`);
 }
 
 // `log` is packages/rules-engine-core's append-only transaction log

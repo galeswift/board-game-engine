@@ -44,9 +44,38 @@ function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-async function createGame() {
-  const res = await fetch(`${BASE}/api/games`, { method: 'POST' });
+async function fetchActions(gameId, { playerId, patchId, rotation } = {}) {
+  const params = new URLSearchParams();
+  if (playerId) params.set('playerId', playerId);
+  if (patchId) params.set('patchId', patchId);
+  if (rotation != null) params.set('rotation', String(rotation));
+  const qs = params.toString();
+  const res = await fetch(`${BASE}/api/games/${gameId}/actions${qs ? `?${qs}` : ''}`);
   return res.json();
+}
+
+// Whether a just-dealt circle's opening 3-patch offer contains anything
+// affordable at the starting 5 buttons - see createGame/
+// createReadyMultiplayerGame below for how this becomes a real fix
+// (retry with a fresh shuffle) instead of a flaky test.
+async function hasAffordableOffer(gameId, opts = {}) {
+  const { actions } = await fetchActions(gameId, opts);
+  const domain = actions[0]?.params?.patchId?.domain || [];
+  return domain.length > 0;
+}
+
+// A test failure should never mean "rerun and hope" - retries with a
+// bounded attempt count, discarding any game whose opening offer
+// happens to be entirely unaffordable (rare, but a real possibility
+// with a random shuffle) and dealing a fresh one instead. See
+// project_patchwork_multiplayer_flake.md for how this was diagnosed.
+async function createGame() {
+  for (let attempt = 0; attempt < 10; attempt++) {
+    const res = await fetch(`${BASE}/api/games`, { method: 'POST' });
+    const data = await res.json();
+    if (await hasAffordableOffer(data.gameId)) return data;
+  }
+  throw new Error('createGame: no affordable opening offer after 10 attempts');
 }
 
 async function createMultiplayerGame() {
@@ -56,6 +85,22 @@ async function createMultiplayerGame() {
     body: JSON.stringify({ mode: 'multiplayer' }),
   });
   return res.json();
+}
+
+// Like createMultiplayerGame, but also joins both slots and guarantees
+// the resulting in-progress game's opening offer is affordable - for
+// tests that need to immediately act on a real placement right after
+// both players are seated.
+async function createReadyMultiplayerGame() {
+  for (let attempt = 0; attempt < 10; attempt++) {
+    const created = await createMultiplayerGame();
+    const p1 = await join(created.gameId, tokenFor(created.invites, 0));
+    const p2 = await join(created.gameId, tokenFor(created.invites, 1));
+    if (await hasAffordableOffer(created.gameId, { playerId: p1.playerId })) {
+      return { ...created, p1, p2 };
+    }
+  }
+  throw new Error('createReadyMultiplayerGame: no affordable opening offer after 10 attempts');
 }
 
 async function join(gameId, inviteToken) {
@@ -71,26 +116,18 @@ function tokenFor(invites, slot) {
   return invites.find((i) => i.slot === slot).token;
 }
 
-async function fetchActions(gameId, { playerId, patchId, rotation } = {}) {
-  const params = new URLSearchParams();
-  if (playerId) params.set('playerId', playerId);
-  if (patchId) params.set('patchId', patchId);
-  if (rotation != null) params.set('rotation', String(rotation));
-  const qs = params.toString();
-  const res = await fetch(`${BASE}/api/games/${gameId}/actions${qs ? `?${qs}` : ''}`);
-  return res.json();
-}
-
 // Which patch is buyable isn't fixed (the patch circle is shuffled per
-// game - engine.js/patchCircle.js), so ask the server which of the 3
-// currently offered patches is pickable, then where it's legal to
+// game - gameDefinition.js/patchCircle.js), so ask the server which of
+// the 3 currently offered patches is pickable, then where it's legal to
 // place, rather than assuming a fixed id/anchor.
 async function firstPickablePlacement(gameId, opts = {}) {
   const { actions } = await fetchActions(gameId, opts);
   const domain = actions[0].params.patchId.domain;
-  // See server.test.js's firstPickablePlacement for why this is
-  // asserted explicitly rather than left to fail confusingly downstream.
-  assert.ok(domain.length > 0, 'no affordable patch offered - rerun (rare shuffle) or raise starting buttons for this test');
+  // Every caller reaches this via createGame()/createReadyMultiplayerGame()
+  // (both retry until the opening offer is affordable), so an empty
+  // domain here means one of those guarantees broke, not "rare bad
+  // luck, rerun."
+  assert.ok(domain.length > 0, 'no affordable patch offered - the calling helper should have guaranteed this, so this points at a real bug');
   const patchId = domain[0];
   const { actions: placeActions } = await fetchActions(gameId, { ...opts, patchId, rotation: 0 });
   const [row, col] = placeActions[0].params.anchor.domain[0];
@@ -179,9 +216,7 @@ test('WebSocket live channel', async (t) => {
     });
 
     await t.test('authenticating scopes each socket\'s state push to its own slot', async () => {
-      const { gameId, invites } = await createMultiplayerGame();
-      const p1 = await join(gameId, tokenFor(invites, 0));
-      const p2 = await join(gameId, tokenFor(invites, 1)); // now in-progress, player 0's turn
+      const { gameId, p1, p2 } = await createReadyMultiplayerGame(); // now in-progress, player 0's turn
 
       const socketP1 = await connectAndAuthenticate(gameId, p1.playerId);
       const socketP2 = await connectAndAuthenticate(gameId, p2.playerId);

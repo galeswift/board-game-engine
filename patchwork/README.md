@@ -4,12 +4,13 @@ Second board-game-engine prototype. Backend plumbing (async lobbies,
 per-slot invite links, a WebSocket live channel, Postgres persistence)
 is now at parity with `tic-tac-toe/`'s — ported wholesale, see
 [`docs/patchwork-next-steps.md`](../docs/patchwork-next-steps.md) for the
-full status. **The rules underneath are still tic-tac-toe's rules,
-copied as-is** — `engine.js` here is scaffolding, not real Patchwork;
-don't build on top of it. See
-[`docs/architecture.md`](../docs/architecture.md) Section 12 for the real
-design (asymmetric, time-track-driven turn order and per-player economy)
-this will eventually be replaced with.
+full status. Real Patchwork rules (asymmetric, time-track-driven turn
+order, a per-player button economy, real scoring) are implemented in
+`gameDefinition.js`, expressed against
+[`packages/rules-engine-core`](../packages/rules-engine-core) - the
+generic phases/command/event engine from
+[`docs/architecture.md`](../docs/architecture.md) Section 12, which
+Patchwork was picked as the second proof-of-concept to stress-test.
 
 The frontend is a Vite/React app in [`web/`](web/) — a like-for-like
 port of the old vanilla-JS client's behavior (create local/multiplayer
@@ -88,13 +89,32 @@ Via the Railway dashboard:
    **Connect**) tab, and copy its connection string (usually shown as
    `DATABASE_URL` or `DATABASE_PUBLIC_URL`).
 3. Open the `patchwork` service's **Variables** tab (create the service
-   first via **New** → **GitHub Repo**, pointing its **Root Directory**
-   setting at `patchwork/`, if it doesn't exist yet), add a new variable
-   named `DATABASE_URL`, and paste that connection string in (Railway may
-   also offer a "reference another service's variable" option here
-   instead of pasting a static value - either works).
+   first via **New** → **GitHub Repo** if it doesn't exist yet), add a
+   new variable named `DATABASE_URL`, and paste that connection string
+   in (Railway may also offer a "reference another service's variable"
+   option here instead of pasting a static value - either works).
 4. Redeploy the `patchwork` service if it doesn't happen automatically
    after saving the variable.
+
+### Root Directory / Dockerfile path
+
+Since the `packages/rules-engine-core` retrofit
+(`docs/patchwork-next-steps.md`), `Dockerfile`'s build context is the
+**repo root**, not `patchwork/` - it needs to `COPY` files from
+`packages/`, outside this folder. That means the service's Railway
+settings need **both** of these (Root Directory alone isn't enough -
+Railway's default Dockerfile discovery only looks at the top of Root
+Directory, not subfolders):
+
+1. **Settings → Root Directory**: `.` (the repo root) - this is what
+   becomes the Docker build context.
+2. **Variables**: add `RAILWAY_DOCKERFILE_PATH` = `patchwork/Dockerfile`
+   - tells Railway which file, inside that root-directory context, is
+   the actual Dockerfile.
+
+Verify locally before changing these on a live service:
+`docker build -f patchwork/Dockerfile -t patchwork-test .` from the
+repo root.
 
 Railway intentionally doesn't auto-provision billed infrastructure just
 from a git push - attaching a database has to be a deliberate step you

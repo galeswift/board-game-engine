@@ -43,21 +43,33 @@ function waitForExit(child) {
   return new Promise((resolve) => child.once('exit', resolve));
 }
 
+// A test failure should never mean "rerun and hope" - a random
+// shuffle can, rarely, offer 3 opening patches that are all
+// unaffordable at the starting 5 buttons; retry with a fresh game
+// instead of asserting and hoping (see
+// project_patchwork_multiplayer_flake.md for how this was diagnosed).
+async function createAffordableGame() {
+  for (let attempt = 0; attempt < 10; attempt++) {
+    const createRes = await fetch(`${BASE}/api/games`, { method: 'POST' });
+    const { gameId } = await createRes.json();
+    const { actions } = await (await fetch(`${BASE}/api/games/${gameId}/actions`)).json();
+    const domain = actions[0]?.params?.patchId?.domain || [];
+    if (domain.length > 0) return { gameId, domain };
+  }
+  throw new Error('createAffordableGame: no affordable opening offer after 10 attempts');
+}
+
 test('game state survives a server restart', async () => {
   let child = spawnServer();
   try {
     await waitForServer();
 
-    const createRes = await fetch(`${BASE}/api/games`, { method: 'POST' });
-    const { gameId } = await createRes.json();
-
     // Which patch to buy isn't hardcoded - the patch circle is shuffled
-    // per game (engine.js/patchCircle.js), so ask the server which of
-    // the 3 currently offered patches is actually pickable, then where
-    // it's legal to place, rather than assuming a fixed id/anchor.
-    const { actions } = await (await fetch(`${BASE}/api/games/${gameId}/actions`)).json();
-    const domain = actions[0].params.patchId.domain;
-    assert.ok(domain.length > 0, 'no affordable patch offered - rerun (rare shuffle) or raise starting buttons for this test');
+    // per game (gameDefinition.js/patchCircle.js), so ask the server
+    // which of the 3 currently offered patches is actually pickable,
+    // then where it's legal to place, rather than assuming a fixed
+    // id/anchor.
+    const { gameId, domain } = await createAffordableGame();
     const patchId = domain[0];
     const { actions: placeActions } = await (await fetch(`${BASE}/api/games/${gameId}/actions?patchId=${patchId}&rotation=0`)).json();
     const [row, col] = placeActions[0].params.anchor.domain[0];

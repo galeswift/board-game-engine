@@ -26,9 +26,31 @@ async function waitForServer(timeoutMs = 5000) {
   }
 }
 
+// Whether a just-dealt circle's opening 3-patch offer contains anything
+// affordable at the starting 5 buttons. A random shuffle can, rarely,
+// offer 3 patches that all cost more than that - see
+// hasAffordableOffer's callers below for how this is turned into a
+// real fix (retry with a fresh shuffle) rather than a flaky test.
+async function hasAffordableOffer(gameId, opts = {}) {
+  const { actions } = await fetchActions(gameId, opts);
+  const domain = actions[0]?.params?.patchId?.domain || [];
+  return domain.length > 0;
+}
+
+// A test failure should never mean "rerun and hope" - retries here
+// with a bounded attempt count instead, discarding any game whose
+// opening offer happens to be entirely unaffordable and dealing a
+// fresh one. 10 attempts against real patch-cost data (most of the 33
+// patches cost <= 5) makes exhausting this astronomically unlikely
+// without ever making the *game's* own shuffle deterministic (which
+// would just move the non-determinism problem, not remove it).
 async function createGame() {
-  const res = await fetch(`${BASE}/api/games`, { method: 'POST' });
-  return res.json();
+  for (let attempt = 0; attempt < 10; attempt++) {
+    const res = await fetch(`${BASE}/api/games`, { method: 'POST' });
+    const data = await res.json();
+    if (await hasAffordableOffer(data.gameId)) return data;
+  }
+  throw new Error('createGame: no affordable opening offer after 10 attempts');
 }
 
 async function createMultiplayerGame() {
@@ -38,6 +60,22 @@ async function createMultiplayerGame() {
     body: JSON.stringify({ mode: 'multiplayer' }),
   });
   return res.json();
+}
+
+// Like createMultiplayerGame, but also joins both slots and guarantees
+// the resulting in-progress game's opening offer is affordable (see
+// createGame's comment) - for tests that need to immediately act on a
+// real placement right after both players are seated.
+async function createReadyMultiplayerGame() {
+  for (let attempt = 0; attempt < 10; attempt++) {
+    const created = await createMultiplayerGame();
+    const p1 = await join(created.gameId, tokenFor(created.invites, 0));
+    const p2 = await join(created.gameId, tokenFor(created.invites, 1));
+    if (await hasAffordableOffer(created.gameId, { playerId: p1.playerId })) {
+      return { ...created, p1, p2 };
+    }
+  }
+  throw new Error('createReadyMultiplayerGame: no affordable opening offer after 10 attempts');
 }
 
 async function join(gameId, inviteToken) {
@@ -81,14 +119,13 @@ async function fetchActions(gameId, { playerId, patchId, rotation } = {}) {
 async function firstPickablePlacement(gameId, opts = {}) {
   const { actions } = await fetchActions(gameId, opts);
   const domain = actions[0].params.patchId.domain;
-  // A random 3-patch circle window can, rarely, be entirely
-  // unaffordable at the starting 5 buttons - fail loudly here rather
-  // than falling through to a confusing "cannot read domain of
-  // undefined" a few calls downstream (this is what
-  // project_patchwork_multiplayer_flake.md's originally-unreproduced
-  // flake turned out to be, diagnosed during the phases/rules-engine-core
-  // migration).
-  assert.ok(domain.length > 0, 'no affordable patch offered - rerun (rare shuffle) or raise starting buttons for this test');
+  // Every caller reaches this via createGame()/createReadyMultiplayerGame()
+  // (both retry until the opening offer is affordable - see their
+  // comments and project_patchwork_multiplayer_flake.md), so an empty
+  // domain here means one of those guarantees broke, not "rare bad
+  // luck, rerun" - fail loudly rather than falling through to a
+  // confusing "cannot read domain of undefined" a few calls downstream.
+  assert.ok(domain.length > 0, 'no affordable patch offered - the calling helper should have guaranteed this, so this points at a real bug');
   const patchId = domain[0];
   const { actions: placeActions } = await fetchActions(gameId, { ...opts, patchId, rotation: 0 });
   const [row, col] = placeActions[0].params.anchor.domain[0];
@@ -315,9 +352,7 @@ test('legal actions and preview endpoints', async (t) => {
     });
 
     await t.test('actions enforce whose turn it is', async () => {
-      const { gameId, invites } = await createMultiplayerGame();
-      const p1 = await join(gameId, tokenFor(invites, 0)); // moves first
-      const p2 = await join(gameId, tokenFor(invites, 1));
+      const { gameId, p1, p2 } = await createReadyMultiplayerGame(); // p1 moves first
 
       // 'not-your-turn' is checked before the action's own patchId is
       // even looked at, so a placeholder id is fine here.

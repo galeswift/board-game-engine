@@ -1,10 +1,19 @@
 # Build context is now the REPO ROOT, not patchwork/ - required so
 # COPY can reach packages/rules-engine-core, which lives outside this
 # folder (see docs/patchwork-next-steps.md's "retrofit onto the generic
-# phases/transitions design" entry). Railway's Root Directory setting
-# for this service must be changed from "patchwork" to "." to match -
-# a one-time manual dashboard change, done deliberately, not a new
-# shared build step (still a single `docker build` invocation).
+# phases/transitions design" entry). Verified locally as:
+#   docker build -f patchwork/Dockerfile -t patchwork-test .
+#
+# Railway needs TWO settings changed to match (Root Directory alone is
+# not enough - Railway's default Dockerfile discovery only looks at the
+# top of Root Directory, not subfolders; see README.md's Railway setup
+# section):
+#   1. Root Directory: "patchwork" -> "." (repo root) - this is what
+#      becomes the build context.
+#   2. A RAILWAY_DOCKERFILE_PATH=patchwork/Dockerfile service variable -
+#      tells Railway which file, inside that context, is the Dockerfile.
+# Both are one-time manual dashboard changes, not a new shared build
+# step (still a single `docker build` invocation).
 FROM node:20-slim AS web-build
 WORKDIR /app/web
 COPY patchwork/web/package.json patchwork/web/package-lock.json* ./

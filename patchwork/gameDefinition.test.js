@@ -2,7 +2,7 @@
 
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
-const { createGame, execute, queryLegalActions } = require('../packages/rules-engine-core/src');
+const { createGame, execute, queryLegalActions, replay, extractActionLog } = require('../packages/rules-engine-core/src');
 const PatchworkDefinition = require('./gameDefinition');
 const { getPatch, PATCHES } = require('./patches');
 const { TRACK_LENGTH, BUTTON_INCOME_SPACES } = require('./timeTrack');
@@ -316,4 +316,45 @@ test('offeredPatches always reflects state.shared.market - a sanity cross-check 
     offeredPatches({ patchCircle: record.state.shared.market.circle, neutralTokenIndex: record.state.shared.market.neutralTokenIndex }),
     ['patch-01', 'patch-02', 'patch-03']
   );
+});
+
+test('replay reconstructs a real Patchwork game byte-for-byte from its own persisted action log', () => {
+  // This is the thing that actually proves replay works against real
+  // persisted data, not just the generic fake-game fixture in
+  // packages/rules-engine-core/test/replay.test.js: extractActionLog()
+  // pulls the ordered action sequence straight out of record.log (the
+  // same thing db.js persists), the way a real restored game would.
+  let record = createGame(PatchworkDefinition, { mode: 'local' });
+  const seed = record.state.meta.seed;
+  const started = execute(PatchworkDefinition, record, { type: 'startGame' });
+  assert.equal(started.error, null);
+  record = started.record;
+
+  // A short, real sequence of moves - whatever's actually legal each
+  // turn, not a hand-picked patch id (the circle is shuffled per game).
+  for (let i = 0; i < 6; i++) {
+    const legal = queryLegalActions(PatchworkDefinition, record, null, undefined);
+    const selectAction = legal.find((a) => a.type === 'selectPatch');
+    const affordable = selectAction ? selectAction.params.patchId.domain : [];
+    const placeLegal = affordable.length
+      ? queryLegalActions(PatchworkDefinition, record, null, { patchId: affordable[0], rotation: 0 })
+      : [];
+    const placeAction = placeLegal.find((a) => a.type === 'placePatch');
+    const result = placeAction && placeAction.params.anchor.domain.length > 0
+      ? execute(PatchworkDefinition, record, {
+          type: 'placePatch',
+          params: { patchId: affordable[0], rotation: 0, row: placeAction.params.anchor.domain[0][0], col: placeAction.params.anchor.domain[0][1] },
+        })
+      : execute(PatchworkDefinition, record, { type: 'advanceTimeToken' });
+    assert.equal(result.error, null);
+    record = result.record;
+  }
+
+  const actionLog = extractActionLog(record.log);
+  // startGame plus at least a few real moves.
+  assert.ok(actionLog.length >= 6);
+  assert.deepEqual(actionLog[0], { type: 'startGame' });
+
+  const replayed = replay(PatchworkDefinition, seed, [0, 1], actionLog);
+  assert.deepEqual(replayed.state, record.state);
 });
