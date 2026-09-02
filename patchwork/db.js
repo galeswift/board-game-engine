@@ -33,6 +33,7 @@ async function ensureSchema() {
         id TEXT PRIMARY KEY,
         mode TEXT NOT NULL,
         state JSONB NOT NULL,
+        log JSONB NOT NULL DEFAULT '[]',
         lobby JSONB,
         created_at TIMESTAMPTZ NOT NULL DEFAULT now()
       )
@@ -40,24 +41,34 @@ async function ensureSchema() {
   } catch (err) {
     if (err.code !== '42P07' && err.code !== '23505') throw err;
   }
+  // Self-heals a `games` table that predates the `log` column (this
+  // migration's own local Postgres, and the live Railway deploy, both
+  // already have the table from before this column existed) - existing
+  // rows are disposable prototype data (docs/patchwork-next-steps.md's
+  // retrofit entry, "clean break" decision), so no backfill needed.
+  await pool.query(`ALTER TABLE games ADD COLUMN IF NOT EXISTS log JSONB NOT NULL DEFAULT '[]'`);
 }
 
-async function insertGame(id, mode, state, lobby) {
+// `log` is packages/rules-engine-core's append-only transaction log
+// (record.log) - stored alongside state so a restarted server picks up
+// exactly where the in-memory record left off, same as state/lobby
+// already did.
+async function insertGame(id, mode, state, log, lobby) {
   await pool.query(
-    'INSERT INTO games (id, mode, state, lobby) VALUES ($1, $2, $3, $4)',
-    [id, mode, state, lobby],
+    'INSERT INTO games (id, mode, state, log, lobby) VALUES ($1, $2, $3, $4, $5)',
+    [id, mode, state, JSON.stringify(log), lobby],
   );
 }
 
-// { mode, state, lobby } or null if no game has this id. `pg` parses
-// the JSONB columns back into plain objects automatically.
+// { mode, state, log, lobby } or null if no game has this id. `pg`
+// parses the JSONB columns back into plain objects automatically.
 async function getGame(id) {
-  const { rows } = await pool.query('SELECT mode, state, lobby FROM games WHERE id = $1', [id]);
+  const { rows } = await pool.query('SELECT mode, state, log, lobby FROM games WHERE id = $1', [id]);
   return rows[0] || null;
 }
 
-async function saveGame(id, { state, lobby }) {
-  await pool.query('UPDATE games SET state = $2, lobby = $3 WHERE id = $1', [id, state, lobby]);
+async function saveGame(id, { state, log, lobby }) {
+  await pool.query('UPDATE games SET state = $2, log = $3, lobby = $4 WHERE id = $1', [id, state, JSON.stringify(log), lobby]);
 }
 
 module.exports = { pool, ensureSchema, insertGame, getGame, saveGame };

@@ -4,15 +4,46 @@ const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const { createPatchCircle, offeredPatches, takePatch } = require('./patchCircle');
 const { PATCHES } = require('./patches');
+const rng = require('../packages/rules-engine-core/src/rng');
+
+// Test-only rng - these tests aren't exercising determinism/replay
+// themselves (that's packages/rules-engine-core/test/replay.test.js's
+// job), just createPatchCircle's shuffle/token-placement logic, so a
+// fresh Math.random()-seeded generator per call is fine here.
+function testRng() {
+  let state = Math.floor(Math.random() * 0x7fffffff);
+  return () => {
+    const step = rng.step(state);
+    state = step.nextState;
+    return step.value;
+  };
+}
 
 test('createPatchCircle is a full shuffle of every real patch, no duplicates or drops', () => {
-  const { patchCircle } = createPatchCircle(PATCHES);
+  const { patchCircle } = createPatchCircle(PATCHES, testRng());
   assert.equal(patchCircle.length, 33);
   assert.deepEqual([...patchCircle].sort(), PATCHES.map((p) => p.id).sort());
 });
 
+test('the same seeded rng sequence produces the same shuffle', () => {
+  const a = createPatchCircle(PATCHES, testRng());
+  const fixedSeed = 12345;
+  function seededRng(seed) {
+    let state = seed;
+    return () => {
+      const step = rng.step(state);
+      state = step.nextState;
+      return step.value;
+    };
+  }
+  const b = createPatchCircle(PATCHES, seededRng(fixedSeed));
+  const c = createPatchCircle(PATCHES, seededRng(fixedSeed));
+  assert.deepEqual(b, c);
+  assert.notDeepEqual(a.patchCircle, b.patchCircle);
+});
+
 test('the neutral token starts immediately after the smallest patch (patch-01, the 1x2 domino)', () => {
-  const { patchCircle, neutralTokenIndex } = createPatchCircle(PATCHES);
+  const { patchCircle, neutralTokenIndex } = createPatchCircle(PATCHES, testRng());
   const smallestIndex = patchCircle.indexOf('patch-01');
   assert.equal(neutralTokenIndex, (smallestIndex + 1) % patchCircle.length);
   // The smallest patch itself is never one of the first three offered.
@@ -82,7 +113,7 @@ test('takePatch does not mutate the input state', () => {
 
 test('buying every patch down to an empty circle never drops, duplicates, or crashes - across many random runs', () => {
   for (let run = 0; run < 200; run++) {
-    let state = createPatchCircle(PATCHES);
+    let state = createPatchCircle(PATCHES, testRng());
     const taken = [];
     while (state.patchCircle.length > 0) {
       const offers = offeredPatches(state);

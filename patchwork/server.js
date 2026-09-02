@@ -5,17 +5,20 @@
 // section and CLAUDE.md's dependency notes). Everything else stays on
 // Node's built-in `http` module, per this project's usual pattern.
 //
-// The lobby/identity/WS/persistence plumbing below is a straight port
-// of tic-tac-toe/server.js's - see docs/patchwork-next-steps.md.
-// engine.js now runs the first real slice of Patchwork's own rules
-// (pick/rotate/place a patch), not tic-tac-toe's placeholder anymore.
+// engine.js is gone - game state/rules now live in gameDefinition.js
+// (a packages/rules-engine-core GameDefinition), and every route below
+// calls into that core package's createGame/execute/preview/
+// queryLegalActions instead of hand-rolled equivalents. See
+// docs/patchwork-next-steps.md's "retrofit onto the generic
+// phases/transitions design" entry for why.
 
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const { WebSocketServer, WebSocket } = require('ws');
-const { createGame, applyAction, queryLegalActions, startGame } = require('./engine');
+const { createGame, execute, preview, queryLegalActions } = require('../packages/rules-engine-core/src');
+const PatchworkDefinition = require('./gameDefinition');
 const { ensureSchema, insertGame, getGame, saveGame } = require('./db');
 const { PATCHES } = require('./patches');
 const { TRACK_LENGTH, BUTTON_INCOME_SPACES } = require('./timeTrack');
@@ -60,17 +63,39 @@ function lobbySummary(record) {
   return Object.fromEntries(SLOTS.map((slot) => [slot, { claimed: record.lobby[slot].playerId !== null }]));
 }
 
+// Strips internal-only engine state before it ever reaches a client:
+// meta.seed/rngState/idCounters are pure functions of each other under
+// the deterministic RNG (packages/rules-engine-core/src/rng.js) - a
+// client that saw any of them could predict every future patch-circle
+// shuffle. The transaction log (record.log) is a server-side/replay
+// concern with no UI use and no size bound, so it never crosses the
+// wire either - see callers below, none of which ever send `log`.
+function toWireState(state) {
+  const { meta, ...rest } = state;
+  return { ...rest, meta: { engineSchemaVersion: meta.engineSchemaVersion, gameVersion: meta.gameVersion } };
+}
+
 // The legal-actions list a specific caller is allowed to see. Local
 // games have no identity concept, so everyone sees the real domain
 // (unchanged pass-and-play behavior). Multiplayer games only reveal the
 // real domain to whichever slot's turn it actually is - anyone else
 // (wrong player, unrecognized playerId, a spectator) gets an empty
 // list, same principle GET /actions and the WS state push both apply.
+//
+// The 'lobby' phase is special-cased to always return [] regardless of
+// mode/identity: core's phases.lobby.allowedActions includes 'startGame'
+// (so gameDefinition.js's own validation and internal calls work), but
+// that action is only ever meant to be issued by this file's own
+// create/join handlers below - never surfaced to or callable by a
+// client. Every other non-'play' phase already has an empty
+// allowedActions list, so queryLegalActions naturally returns []
+// there without needing a similar special case.
 function scopedActions(record, playerId, selection) {
-  const actions = queryLegalActions(record.state, selection);
+  if (record.state.phase.current === 'lobby') return [];
+  const actions = queryLegalActions(PatchworkDefinition, { state: record.state, log: record.log }, playerId, selection);
   if (record.mode !== 'multiplayer') return actions;
   const slot = slotForPlayerId(record.lobby, playerId);
-  return slot !== null && slot === record.state.currentPlayer ? actions : [];
+  return slot !== null && String(slot) === record.state.turnOrder.current ? actions : [];
 }
 
 const MIME_TYPES = {
@@ -128,7 +153,7 @@ function broadcastState(gameId, record) {
   for (const socket of sockets) {
     if (socket.readyState !== WebSocket.OPEN) continue;
     const actions = scopedActions(record, socket.playerId);
-    socket.send(JSON.stringify({ type: 'state', state: record.state, actions, lobby: lobbySummary(record) }));
+    socket.send(JSON.stringify({ type: 'state', state: toWireState(record.state), actions, lobby: lobbySummary(record) }));
   }
 }
 
@@ -166,6 +191,11 @@ const server = http.createServer(async (req, res) => {
 
   // POST /api/games -> create a new game. { mode: 'local' | 'multiplayer' },
   // defaulting to 'local' so existing no-body callers are unaffected.
+  // Local games have nobody to wait for, so the create request itself
+  // is what fills every seat - startGame runs right here, synchronously,
+  // same as it used to run inside createGame before this migration.
+  // Multiplayer games stay in 'lobby' until the join handler below runs
+  // startGame once the last player actually joins.
   if (pathname === '/api/games' && req.method === 'POST') {
     let body;
     try {
@@ -175,20 +205,25 @@ const server = http.createServer(async (req, res) => {
     }
     const mode = body.mode === 'multiplayer' ? 'multiplayer' : 'local';
     const id = crypto.randomBytes(4).toString('hex');
-    const state = createGame({ mode });
+    let { state, log } = createGame(PatchworkDefinition, { mode });
+    if (mode !== 'multiplayer') {
+      const started = execute(PatchworkDefinition, { state, log }, { type: 'startGame' });
+      state = started.record.state;
+      log = started.record.log;
+    }
     const lobby = mode === 'multiplayer'
       ? Object.fromEntries(SLOTS.map((slot) => [slot, { playerId: null, token: crypto.randomBytes(12).toString('hex') }]))
       : null;
-    await insertGame(id, mode, state, lobby);
+    await insertGame(id, mode, state, log, lobby);
     if (mode === 'multiplayer') {
       // Invite tokens are returned only here, at creation - never echoed
       // back by any other endpoint (the lobby summary below is
       // claimed/open only).
       const invites = SLOTS.map((slot) => ({ slot, token: lobby[slot].token }));
-      const record = { mode, state, lobby };
-      sendJSON(res, 201, { gameId: id, mode, state, invites, lobby: lobbySummary(record) });
+      const record = { mode, state, log, lobby };
+      sendJSON(res, 201, { gameId: id, mode, state: toWireState(state), invites, lobby: lobbySummary(record) });
     } else {
-      sendJSON(res, 201, { gameId: id, state }); // unchanged shape for local
+      sendJSON(res, 201, { gameId: id, state: toWireState(state) }); // unchanged shape for local
     }
     return;
   }
@@ -200,7 +235,7 @@ const server = http.createServer(async (req, res) => {
   if (gameMatch && req.method === 'GET') {
     const record = await getGame(gameMatch[1]);
     if (!record) return sendJSON(res, 404, { error: 'not-found' });
-    sendJSON(res, 200, { gameId: gameMatch[1], mode: record.mode, state: record.state, lobby: lobbySummary(record) });
+    sendJSON(res, 200, { gameId: gameMatch[1], mode: record.mode, state: toWireState(record.state), lobby: lobbySummary(record) });
     return;
   }
 
@@ -230,21 +265,25 @@ const server = http.createServer(async (req, res) => {
     const existingPlayerId = record.lobby[slot].playerId;
     if (existingPlayerId) {
       // Reconnect: same token, same playerId, no new state, no write.
-      return sendJSON(res, 200, { gameId: id, playerId: existingPlayerId, slot, state: record.state, lobby: lobbySummary(record) });
+      return sendJSON(res, 200, { gameId: id, playerId: existingPlayerId, slot, state: toWireState(record.state), lobby: lobbySummary(record) });
     }
 
     const playerId = crypto.randomBytes(8).toString('hex');
     record.lobby[slot].playerId = playerId;
 
     if (SLOTS.every((s) => record.lobby[s].playerId !== null)) {
-      record.state = startGame(record.state);
+      const started = execute(PatchworkDefinition, { state: record.state, log: record.log }, { type: 'startGame' });
+      if (started.error === null) {
+        record.state = started.record.state;
+        record.log = started.record.log;
+      }
     }
-    await saveGame(id, { state: record.state, lobby: record.lobby });
-    if (record.state.phase === 'play') {
+    await saveGame(id, { state: record.state, log: record.log, lobby: record.lobby });
+    if (record.state.phase.current === 'play') {
       broadcastState(id, record);
     }
 
-    sendJSON(res, 200, { gameId: id, playerId, slot, state: record.state, lobby: lobbySummary(record) });
+    sendJSON(res, 200, { gameId: id, playerId, slot, state: toWireState(record.state), lobby: lobbySummary(record) });
     return;
   }
 
@@ -261,8 +300,8 @@ const server = http.createServer(async (req, res) => {
     const playerId = url.searchParams.get('playerId');
     // Optional: once a client has picked a patch, it asks here for the
     // domain of legal placements for that specific patch/rotation - see
-    // engine.js's queryLegalActions. Omitted, this just returns the
-    // pickable-patches domain instead.
+    // gameDefinition.js's placePatch.legalParams. Omitted, this just
+    // returns the pickable-patches domain instead.
     const patchId = url.searchParams.get('patchId');
     const selection = patchId ? { patchId, rotation: url.searchParams.get('rotation') } : undefined;
     sendJSON(res, 200, { gameId: id, actions: scopedActions(record, playerId, selection) });
@@ -271,31 +310,39 @@ const server = http.createServer(async (req, res) => {
 
   // POST /api/games/:id/actions -> apply an action. Multiplayer games
   // require a `playerId` in the body matching the slot whose turn it
-  // is; local games are unchanged (no identity to check).
+  // is; local games are unchanged (no identity to check). `startGame`
+  // is rejected unconditionally here - it's only ever issued internally
+  // by the create/join handlers above, never a real client move (see
+  // scopedActions' comment for why it can't just be filtered out of the
+  // legal-actions listing alone).
   if (actionMatch && req.method === 'POST') {
     const id = actionMatch[1];
     const record = await getGame(id);
     if (!record) return sendJSON(res, 404, { error: 'not-found' });
     try {
       const action = await readJsonBody(req);
+      if (action.type === 'startGame') {
+        return sendJSON(res, 400, { gameId: id, state: toWireState(record.state), error: 'illegal-action' });
+      }
       if (record.mode === 'multiplayer') {
         const slot = slotForPlayerId(record.lobby, action.playerId);
         if (slot === null) {
-          return sendJSON(res, 400, { gameId: id, state: record.state, error: 'invalid-player' });
+          return sendJSON(res, 400, { gameId: id, state: toWireState(record.state), error: 'invalid-player' });
         }
-        if (slot !== record.state.currentPlayer) {
-          return sendJSON(res, 400, { gameId: id, state: record.state, error: 'not-your-turn' });
+        if (String(slot) !== record.state.turnOrder.current) {
+          return sendJSON(res, 400, { gameId: id, state: toWireState(record.state), error: 'not-your-turn' });
         }
       }
-      const result = applyAction(record.state, action);
-      record.state = result.state;
+      const result = execute(PatchworkDefinition, { state: record.state, log: record.log }, { type: action.type, params: action.params });
+      record.state = result.record.state;
+      record.log = result.record.log;
       if (!result.error) {
-        await saveGame(id, { state: record.state, lobby: record.lobby });
+        await saveGame(id, { state: record.state, log: record.log, lobby: record.lobby });
         broadcastState(id, record);
       }
       sendJSON(res, result.error ? 400 : 200, {
         gameId: id,
-        state: result.state,
+        state: toWireState(record.state),
         error: result.error,
       });
     } catch (e) {
@@ -307,9 +354,10 @@ const server = http.createServer(async (req, res) => {
 
   // POST /api/games/:id/actions/preview -> same computation as applying
   // an action, just not persisted (and not broadcast - nothing actually
-  // changed). applyAction is already pure, so preview and commit are
-  // literally the same function call - only whether the result gets
-  // written to storage/pushed over the socket differs.
+  // changed). preview() is a thin wrapper around the same execute() the
+  // real commit path uses (packages/rules-engine-core/src/engine.js) -
+  // only whether the result gets written to storage/pushed over the
+  // socket differs.
   const previewMatch = pathname.match(/^\/api\/games\/([a-zA-Z0-9]+)\/actions\/preview$/);
   if (previewMatch && req.method === 'POST') {
     const id = previewMatch[1];
@@ -317,10 +365,10 @@ const server = http.createServer(async (req, res) => {
     if (!record) return sendJSON(res, 404, { error: 'not-found' });
     try {
       const action = await readJsonBody(req);
-      const result = applyAction(record.state, action);
+      const result = preview(PatchworkDefinition, { state: record.state, log: record.log }, { type: action.type, params: action.params });
       sendJSON(res, result.error ? 400 : 200, {
         gameId: id,
-        preview: result.state,
+        preview: toWireState(result.state),
         error: result.error,
       });
     } catch (e) {

@@ -13,16 +13,16 @@
 // after a purchase, the token moves to sit where the bought patch was,
 // so the patch immediately after it becomes the new first-offered patch.
 //
-// `Math.random()`, not a seeded RNG: this engine already isn't the full
-// deterministic-replay pipeline from docs/architecture.md (see engine.js's
-// header comment) - same simplification applies here as everywhere else
-// in this file.
+// `rng` is packages/rules-engine-core's seeded context.rng() - never
+// Math.random() (see docs/architecture.md Section 3's deterministic
+// replay requirement). The caller (gameDefinition.js's DealPatchCircle
+// command) is the only place that ever has a real context to draw from.
 
 // Fisher-Yates. Returns a new array - never mutates `items`.
-function shuffle(items) {
+function shuffle(items, rng) {
   const result = items.slice();
   for (let i = result.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
+    const j = Math.floor(rng() * (i + 1));
     [result[i], result[j]] = [result[j], result[i]];
   }
   return result;
@@ -40,8 +40,8 @@ function smallestPatchId(patches) {
 // definition" ordering); neutralTokenIndex points at the first of the
 // three currently-offered patches (patchCircle[neutralTokenIndex],
 // [+1], [+2], wrapping with % patchCircle.length).
-function createPatchCircle(patches) {
-  const patchCircle = shuffle(patches.map((p) => p.id));
+function createPatchCircle(patches, rng) {
+  const patchCircle = shuffle(patches.map((p) => p.id), rng);
   const smallestIndex = patchCircle.indexOf(smallestPatchId(patches));
   const neutralTokenIndex = (smallestIndex + 1) % patchCircle.length;
   return { patchCircle, neutralTokenIndex };

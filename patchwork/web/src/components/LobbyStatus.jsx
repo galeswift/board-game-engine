@@ -11,7 +11,7 @@ export default function LobbyStatus({ mode, lobby, mySlot, gameState }) {
       <ul id="playerList" className="player-list">
         {SLOTS.map((slot) => {
           const claimed = lobby[slot].claimed;
-          const isTurn = gameState.phase === 'play' && gameState.currentPlayer === slot;
+          const isTurn = gameState.phase.current === 'play' && Number(gameState.turnOrder.current) === slot;
           const detail = !claimed
             ? 'waiting…'
             : isTurn ? (slot === mySlot ? 'your turn' : 'their turn') : 'joined';

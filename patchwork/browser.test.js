@@ -97,7 +97,11 @@ test('browser end-to-end', async (t) => {
       await page.locator('#quiltBoard-0 .quilt-cell.highlight').first().waitFor();
       await cell.click();
 
-      await waitFor(async () => (await page.locator(`.patch-tile[data-patch-id="${patchId}"]`).isDisabled()));
+      // A bought patch leaves the circle entirely (PatchPicker renders
+      // only the current, shrinking circle - not a static pool of all
+      // 33 with taken ones greyed out), so it disappears from the
+      // picker rather than becoming disabled.
+      await waitFor(async () => (await page.locator(`.patch-tile[data-patch-id="${patchId}"]`).count()) === 0);
       await waitFor(async () => (await page.locator('#quiltBoard-0 .quilt-cell.filled').count()) > 0);
       // Player 1 just moved and is still ahead of player 2 (who hasn't
       // moved at all yet), so player 2 - still further behind on the
@@ -154,10 +158,11 @@ test('browser end-to-end', async (t) => {
       await cell.click();
 
       // Guest's view updates live: it's now their turn (still behind on
-      // the time track), and the placed patch is greyed out on their
-      // picker too (shared pool).
+      // the time track), and the placed patch is gone from their picker
+      // too (shared circle - see the local-game test above for why it
+      // disappears rather than becoming disabled).
       await waitFor(async () => (await guestPage.locator('#status').textContent()) === 'Player 2 turn — pick a patch below');
-      await waitFor(async () => await guestPage.locator(`.patch-tile[data-patch-id="${patchId}"]`).isDisabled());
+      await waitFor(async () => (await guestPage.locator(`.patch-tile[data-patch-id="${patchId}"]`).count()) === 0);
       await waitFor(async () => (await hostPage.locator('#status').textContent()) === 'Waiting for the other player…');
 
       // And the host's own placement is visible on the *opponent's*

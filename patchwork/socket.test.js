@@ -87,14 +87,18 @@ async function fetchActions(gameId, { playerId, patchId, rotation } = {}) {
 // place, rather than assuming a fixed id/anchor.
 async function firstPickablePlacement(gameId, opts = {}) {
   const { actions } = await fetchActions(gameId, opts);
-  const patchId = actions[0].params.patchId.domain[0];
+  const domain = actions[0].params.patchId.domain;
+  // See server.test.js's firstPickablePlacement for why this is
+  // asserted explicitly rather than left to fail confusingly downstream.
+  assert.ok(domain.length > 0, 'no affordable patch offered - rerun (rare shuffle) or raise starting buttons for this test');
+  const patchId = domain[0];
   const { actions: placeActions } = await fetchActions(gameId, { ...opts, patchId, rotation: 0 });
   const [row, col] = placeActions[0].params.anchor.domain[0];
   return { patchId, row, col };
 }
 
 async function placePatch(gameId, playerId, patchId, row, col) {
-  const action = { type: 'placePatch', patchId, rotation: 0, row, col };
+  const action = { type: 'placePatch', params: { patchId, rotation: 0, row, col } };
   if (playerId) action.playerId = playerId;
   return fetch(`${BASE}/api/games/${gameId}/actions`, {
     method: 'POST',
@@ -134,13 +138,13 @@ test('WebSocket live channel', async (t) => {
         fetch(`${BASE}/api/games/${gameId}/actions`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ type: 'placePatch', patchId, rotation: 0, row, col }),
+          body: JSON.stringify({ type: 'placePatch', params: { patchId, rotation: 0, row, col } }),
         }),
       ]);
 
       for (const message of [messageA, messageB]) {
         assert.equal(message.type, 'state');
-        assert.equal(message.state.quiltBoards[0].includes(patchId), true);
+        assert.equal(message.state.players['0'].quiltBoard.includes(patchId), true);
       }
 
       socketA.close();
@@ -159,7 +163,7 @@ test('WebSocket live channel', async (t) => {
       await fetch(`${BASE}/api/games/${gameId}/actions`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ type: 'placePatch', patchId, rotation: 0, row: 8, col: 0 }),
+        body: JSON.stringify({ type: 'placePatch', params: { patchId, rotation: 0, row: 8, col: 0 } }),
       });
 
       await assert.rejects(() => waitForMessage(socket, 500));

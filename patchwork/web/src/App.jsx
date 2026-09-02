@@ -236,7 +236,7 @@ export default function App() {
 
   
   async function advanceTimeToken() {
-    const action = { type: 'advanceTimeToken' };
+    const action = { type: 'advanceTimeToken', params: {} };
     if (playerId) action.playerId = playerId;
     const res = await fetch(`/api/games/${gameId}/actions`, {
       method: 'POST',
@@ -256,7 +256,7 @@ export default function App() {
     const pivot = nearestInDomain(row, col, placementDomain);
     if (!pivot) return; // no legal placement anywhere near this cell
     const [pivotRow, pivotCol] = pivot;
-    const action = { type: 'placePatch', patchId: selectedPatchId, rotation, row: pivotRow, col: pivotCol };
+    const action = { type: 'placePatch', params: { patchId: selectedPatchId, rotation, row: pivotRow, col: pivotCol } };
     if (playerId) action.playerId = playerId;
     const res = await fetch(`/api/games/${gameId}/actions`, {
       method: 'POST',
@@ -397,39 +397,47 @@ export default function App() {
     );
   }
 
+  // gameState.turnOrder.current is a string slot key ("0"/"1") on the
+  // wire - converted to a number once here, used everywhere below that
+  // used to read the old flat gameState.currentPlayer.
+  const currentPlayer = Number(gameState.turnOrder.current);
   const canAct = legalActions.some((a) => a.type === 'selectPatch');
   // The only patches actually pickable right now - the 3 in front of
   // the neutral token, further filtered to what's affordable (see
-  // engine.js's queryLegalActions/patchCircle.js) - straight from the
-  // server, per "Client Authority: Zero": PatchPicker must never
-  // recompute this from gameState.availablePatches (the whole
-  // remaining circle) itself.
+  // gameDefinition.js's selectPatch.legalParams/patchCircle.js) -
+  // straight from the server, per "Client Authority: Zero": PatchPicker
+  // must never recompute this from gameState.shared.market.circle (the
+  // whole remaining circle) itself.
   const pickableDomain = legalActions.find((a) => a.type === 'selectPatch')?.params.patchId.domain ?? [];
-  const interactiveSlot = canAct ? gameState.currentPlayer : null;
+  const interactiveSlot = canAct ? currentPlayer : null;
   // The slot this browser controls right now: in multiplayer that's the
   // fixed identity from the invite token (mySlot, null until joined -
   // never anyone else's turn to act as); in local pass-and-play there's
   // no per-slot identity at all, so it's whoever's turn it currently is.
   // Every consumer that used to branch on `mode === 'multiplayer'` to
-  // choose between `mySlot` and `gameState.currentPlayer` reads this
-  // instead, so that branch is only ever written once.
-  const activeSlot = mode === 'multiplayer' ? mySlot : gameState.currentPlayer;
+  // choose between `mySlot` and `currentPlayer` reads this instead, so
+  // that branch is only ever written once.
+  const activeSlot = mode === 'multiplayer' ? mySlot : currentPlayer;
   const highlighted = new Set(highlightedCells.map(([row, col]) => `${row},${col}`));
-  const drawGameplayElements = mode !== 'multiplayer' || gameState.phase !== 'lobby';
-  const statusText = gameState.phase === 'lobby'
+  const phase = gameState.phase.current;
+  const drawGameplayElements = mode !== 'multiplayer' || phase !== 'lobby';
+  const statusText = phase === 'lobby'
     ? 'Waiting for another player to join… share the link!'
-    : gameState.phase === 'complete'
-      ? 'All patches have been placed!'
-      : !canAct
-        ? "Waiting for the other player…"
-        : selectedPatchId
-          ? `Choose where to place ${selectedPatchId} on your board`
-          : `Player ${gameState.currentPlayer + 1} turn — pick a patch below`;
-  
-  let patchCircle = [];
-  gameState.availablePatches.forEach((patch) => {
-    patchCircle.push(patchesById.get(patch));
-  });
+    : phase === 'scoring'
+      ? 'Scoring the final boards…'
+      : phase === 'gameOver'
+        ? 'Game over!'
+        : !canAct
+          ? "Waiting for the other player…"
+          : selectedPatchId
+            ? `Choose where to place ${selectedPatchId} on your board`
+            : `Player ${currentPlayer + 1} turn — pick a patch below`;
+
+  const patchCircle = gameState.shared.market.circle.map((id) => patchesById.get(id));
+  // TimeTrack/MoneyStatus still take a flat {0: pos, 1: pos}-shaped
+  // prop rather than reading gameState.players directly - built here
+  // once rather than changing those components' own prop shape.
+  const timeTrackPositions = { 0: gameState.players['0'].timeTrackPosition, 1: gameState.players['1'].timeTrackPosition };
 
   return (
     <main className="patchwork-app">
@@ -446,7 +454,7 @@ export default function App() {
                 key={slot}
                 slot={slot}
                 label={mode === 'multiplayer' ? (slot === activeSlot ? 'Your board' : "Opponent's board") : `Player ${slot + 1}`}
-                board={gameState.quiltBoards[slot]}
+                board={gameState.players[String(slot)].quiltBoard}
                 interactive={slot === interactiveSlot && !!selectedPatchId}
                 highlighted={highlighted}
                 onCellClick={placeSelectedPatch}
@@ -454,19 +462,19 @@ export default function App() {
               />
             ))}
           </div>
-          <button onClick={advanceTimeToken} disabled={activeSlot !== gameState.currentPlayer}>
+          <button onClick={advanceTimeToken} disabled={activeSlot !== currentPlayer}>
             Advance Time Token
           </button>
           <RotateControl rotation={rotation} onRotate={rotateSelected} disabled={!selectedPatchId} />
           <MoneyStatus gameState={gameState} slots={SLOTS} />
           <TimeTrack
-            playerTimePositions={gameState.timeTrackPositions}
+            playerTimePositions={timeTrackPositions}
             trackLength={trackInfo.trackLength}
             buttonIncomeSpaces={trackInfo.buttonIncomeSpaces}
-          />      
+          />
           <PatchPicker
             patches={patchCircle}
-            neutralTokenIndex={gameState.neutralTokenIndex}
+            neutralTokenIndex={gameState.shared.market.neutralTokenIndex}
             pickableDomain={pickableDomain}
             selectedPatchId={selectedPatchId}
             onSelect={selectPatch}
@@ -487,7 +495,7 @@ export default function App() {
         board to place it.</p>
 
       <InvitePanel
-        visible={gameState.phase === 'lobby' && !!inviteLink}
+        visible={phase === 'lobby' && !!inviteLink}
         inviteLink={inviteLink}
         onCopy={handleCopyInvite}
         copyLabel={copyLabel}

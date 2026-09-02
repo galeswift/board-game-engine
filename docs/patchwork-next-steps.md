@@ -279,6 +279,29 @@ instead of prototyped in vanilla JS and then rewritten.
   engine yet - `web/src/data/patches.js`'s client-side copy deliberately
   trimmed them out since nothing client-side needs them yet either.
 
+- **Retrofit `patchwork/engine.js` onto the generic phases/transitions
+  design from `docs/architecture.md` §6-11** (`defineGame({ phases:
+  {...} })`, the shared `allowedActions` legality gate, transitions
+  flowing through a command/event pipeline instead of being inlined into
+  `createGame`/`startGame`/`applyAction`). This is a correction, not a
+  new feature: per §12, Patchwork was picked as the second proof-of-concept
+  specifically *to stress-test that design* ("non-alternating turn
+  order," "phases that matter" are listed as the reasons it was chosen
+  over just extending tic-tac-toe). What actually got built (2026-08-31
+  session) is a hand-rolled `phase: 'lobby'|'play'|'complete'` string
+  with two independent inline `if (state.phase !== 'play')` checks
+  (`queryLegalActions` and `applyAction`) - it runs the lobby/setup/play
+  transition correctly, but exercises none of the actual generic
+  machinery the doc describes, so it hasn't actually validated that
+  design the way the game was chosen to do. Also still missing: a real
+  scoring phase (currently `phase` jumps straight from `'play'` to
+  `'complete'` when the circle empties, with no 7x7-bonus/empty-square
+  scoring computed) and a seeded/deterministic RNG context for the patch
+  circle shuffle (`docs/architecture.md` §3) - both would be natural
+  forcing functions for finally building this for real, especially once
+  `rules-engine-core` has a second consumer in Forbidden Island to
+  design against rather than just one game's guesses.
+
 ## Key decisions/constraints to carry forward
 
 - **Client Authority: Zero** (see `docs/architecture.md`) still

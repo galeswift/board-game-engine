@@ -56,14 +56,16 @@ test('game state survives a server restart', async () => {
     // the 3 currently offered patches is actually pickable, then where
     // it's legal to place, rather than assuming a fixed id/anchor.
     const { actions } = await (await fetch(`${BASE}/api/games/${gameId}/actions`)).json();
-    const patchId = actions[0].params.patchId.domain[0];
+    const domain = actions[0].params.patchId.domain;
+    assert.ok(domain.length > 0, 'no affordable patch offered - rerun (rare shuffle) or raise starting buttons for this test');
+    const patchId = domain[0];
     const { actions: placeActions } = await (await fetch(`${BASE}/api/games/${gameId}/actions?patchId=${patchId}&rotation=0`)).json();
     const [row, col] = placeActions[0].params.anchor.domain[0];
 
     await fetch(`${BASE}/api/games/${gameId}/actions`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ type: 'placePatch', patchId, rotation: 0, row, col }),
+      body: JSON.stringify({ type: 'placePatch', params: { patchId, rotation: 0, row, col } }),
     });
 
     child.kill();
@@ -75,7 +77,7 @@ test('game state survives a server restart', async () => {
     const res = await fetch(`${BASE}/api/games/${gameId}`);
     assert.equal(res.status, 200, 'the game is still there after the process restarted');
     const { state } = await res.json();
-    assert.equal(state.quiltBoards[0].includes(patchId), true, 'the move made before the restart is still there');
+    assert.equal(state.players['0'].quiltBoard.includes(patchId), true, 'the move made before the restart is still there');
   } finally {
     child.kill();
   }
