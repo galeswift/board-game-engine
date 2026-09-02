@@ -71,7 +71,29 @@ function tokenFor(invites, slot) {
   return invites.find((i) => i.slot === slot).token;
 }
 
-async function placePatch(gameId, playerId, patchId = 'patch-01', row = 0, col = 0) {
+async function fetchActions(gameId, { playerId, patchId, rotation } = {}) {
+  const params = new URLSearchParams();
+  if (playerId) params.set('playerId', playerId);
+  if (patchId) params.set('patchId', patchId);
+  if (rotation != null) params.set('rotation', String(rotation));
+  const qs = params.toString();
+  const res = await fetch(`${BASE}/api/games/${gameId}/actions${qs ? `?${qs}` : ''}`);
+  return res.json();
+}
+
+// Which patch is buyable isn't fixed (the patch circle is shuffled per
+// game - engine.js/patchCircle.js), so ask the server which of the 3
+// currently offered patches is pickable, then where it's legal to
+// place, rather than assuming a fixed id/anchor.
+async function firstPickablePlacement(gameId, opts = {}) {
+  const { actions } = await fetchActions(gameId, opts);
+  const patchId = actions[0].params.patchId.domain[0];
+  const { actions: placeActions } = await fetchActions(gameId, { ...opts, patchId, rotation: 0 });
+  const [row, col] = placeActions[0].params.anchor.domain[0];
+  return { patchId, row, col };
+}
+
+async function placePatch(gameId, playerId, patchId, row, col) {
   const action = { type: 'placePatch', patchId, rotation: 0, row, col };
   if (playerId) action.playerId = playerId;
   return fetch(`${BASE}/api/games/${gameId}/actions`, {
@@ -100,6 +122,7 @@ test('WebSocket live channel', async (t) => {
 
     await t.test('both connected sockets receive a state push after a REST move', async () => {
       const { gameId } = await createGame();
+      const { patchId, row, col } = await firstPickablePlacement(gameId);
 
       const socketA = new WebSocket(`${WS_BASE}/api/games/${gameId}/socket`);
       const socketB = new WebSocket(`${WS_BASE}/api/games/${gameId}/socket`);
@@ -111,13 +134,13 @@ test('WebSocket live channel', async (t) => {
         fetch(`${BASE}/api/games/${gameId}/actions`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ type: 'placePatch', patchId: 'patch-01', rotation: 0, row: 0, col: 0 }),
+          body: JSON.stringify({ type: 'placePatch', patchId, rotation: 0, row, col }),
         }),
       ]);
 
       for (const message of [messageA, messageB]) {
         assert.equal(message.type, 'state');
-        assert.equal(message.state.quiltBoards[0][0], 'patch-01');
+        assert.equal(message.state.quiltBoards[0].includes(patchId), true);
       }
 
       socketA.close();
@@ -126,15 +149,17 @@ test('WebSocket live channel', async (t) => {
 
     await t.test('a rejected action is not broadcast', async () => {
       const { gameId } = await createGame();
+      const { actions } = await fetchActions(gameId);
+      const patchId = actions[0].params.patchId.domain[0];
       const socket = new WebSocket(`${WS_BASE}/api/games/${gameId}/socket`);
       await waitForOpen(socket);
 
-      // An out-of-bounds placement is rejected by applyAction and should
-      // never reach the socket.
+      // row: 8 is off the board regardless of which patch this is -
+      // rejected by applyAction and should never reach the socket.
       await fetch(`${BASE}/api/games/${gameId}/actions`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ type: 'placePatch', patchId: 'patch-01', rotation: 0, row: 8, col: 0 }),
+        body: JSON.stringify({ type: 'placePatch', patchId, rotation: 0, row: 8, col: 0 }),
       });
 
       await assert.rejects(() => waitForMessage(socket, 500));
@@ -157,18 +182,19 @@ test('WebSocket live channel', async (t) => {
       const socketP1 = await connectAndAuthenticate(gameId, p1.playerId);
       const socketP2 = await connectAndAuthenticate(gameId, p2.playerId);
 
+      const { patchId, row, col } = await firstPickablePlacement(gameId, { playerId: p1.playerId });
       const [messageP1, messageP2] = await Promise.all([
         waitForMessage(socketP1),
         waitForMessage(socketP2),
-        placePatch(gameId, p1.playerId),
+        placePatch(gameId, p1.playerId, patchId, row, col),
       ]);
 
       assert.deepEqual(messageP1.actions, [], "not player 0's turn anymore");
-      // Player 1 still has all 5 starting buttons, so their
-      // affordable-patch count is a fresh game's minus the one player 0
-      // just took (see server.test.js's AFFORDABLE_PATCH_IDS for where 24
-      // comes from: patches costing <= 5).
-      assert.equal(messageP2.actions[0]?.params.patchId.domain.length, 23, "it's now player 1's turn, one patch already taken");
+      // It's now player 1's turn - up to the 3 the circle now offers
+      // them (fewer if some aren't affordable), never including the
+      // patch player 0 just took (it's gone from the circle entirely).
+      assert.ok(messageP2.actions[0]?.params.patchId.domain.length <= 3);
+      assert.equal(messageP2.actions[0]?.params.patchId.domain.includes(patchId), false, "it's now player 1's turn, one patch already taken");
       assert.deepEqual(messageP1.lobby, { 0: { claimed: true }, 1: { claimed: true } }, 'the push includes a live lobby summary too');
 
       socketP1.close();

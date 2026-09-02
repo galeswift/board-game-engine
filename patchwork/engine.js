@@ -13,6 +13,7 @@
 
 const { PATCHES, getPatch, rotatePatch } = require('./patches');
 const { TRACK_LENGTH, BUTTON_INCOME_SPACES } = require('./timeTrack');
+const { createPatchCircle, offeredPatches, takePatch } = require('./patchCircle');
 
 const BOARD_SIZE = 9;
 
@@ -20,26 +21,51 @@ function emptyBoard() {
   return Array(BOARD_SIZE * BOARD_SIZE).fill(null);
 }
 
+// Phases (docs/architecture.md Section 6 - "every game's phase list
+// leads with a lobby"): 'lobby' -> 'play' -> 'complete'. 'setup' (deals
+// the patch circle, see runSetup below) is a real phase conceptually,
+// but it's instantaneous and fully automatic in this engine - nothing
+// is ever chosen by a player during it - so it's never itself a
+// persisted/returned phase value; only 'lobby', 'play', and 'complete'
+// are ever observed. The only way `phase` ever changes is as the
+// return value of an actual call into this module (createGame,
+// startGame, or applyAction) - never a spontaneous mutation.
 function createGame({ mode = 'local' } = {}) {
-  return {
+  const lobbyState = {
     quiltBoards: { 0: emptyBoard(), 1: emptyBoard() },
-    availablePatches: PATCHES.map((p) => p.id),
+    availablePatches: [],
+    neutralTokenIndex: 0,
     currentPlayer: 0,
     timeTrackPositions: { 0: 0, 1: 0 },
     playerMoney: { 0: 5, 1: 5 },
-    // 'lobby' | 'in-progress' | 'complete'. 'complete' once every patch
-    // has been placed - no winner/scoring here, just nothing left to do.
-    status: mode === 'multiplayer' ? 'lobby' : 'in-progress',
+    phase: 'lobby',
   };
+  // Local (pass-and-play) games have nobody to wait for - the create
+  // request itself is the action that fills every seat, so setup runs
+  // synchronously right here rather than waiting on a join. Multiplayer
+  // games stay in 'lobby' until startGame() below runs this same setup,
+  // once the last player actually joins (see server.js's join handler).
+  return mode === 'multiplayer' ? lobbyState : runSetup(lobbyState);
 }
 
-// Pure function: state -> state. 'lobby' -> 'in-progress'. A no-op
-// outside 'lobby' so callers don't need to guard the call site.
+// The one-time, automatic setup step: deals the shuffled patch circle
+// and places its neutral token (see patchCircle.js), then enters
+// 'play'. See createGame's comment above for why 'setup' itself is
+// never a value `phase` takes on externally.
+function runSetup(state) {
+  const { patchCircle, neutralTokenIndex } = createPatchCircle(PATCHES);
+  return { ...state, availablePatches: patchCircle, neutralTokenIndex, phase: 'play' };
+}
+
+// Pure function: state -> state. Runs setup and transitions
+// 'lobby' -> 'play', once every seat is filled - called from
+// server.js's join handler when that happens. A no-op outside 'lobby'
+// so callers don't need to guard the call site.
 function startGame(state) {
-  if (state.status !== 'lobby') {
+  if (state.phase !== 'lobby') {
     return state;
   }
-  return { ...state, status: 'in-progress' };
+  return runSetup(state);
 }
 
 // True if every cell of `shape` (already rotated) fits inside the board
@@ -67,6 +93,15 @@ function placementDomain(board, shape) {
   return domain;
 }
 
+// patchCircle.js's functions take/return { patchCircle, neutralTokenIndex }
+// - engine.js's state calls the array `availablePatches` instead (it
+// predates the circle, back when it was just an unordered pool), so
+// every call into patchCircle.js bridges the field name here rather
+// than at each call site.
+function circleFrom(state) {
+  return { patchCircle: state.availablePatches, neutralTokenIndex: state.neutralTokenIndex };
+}
+
 // Pure function: state -> Action[]. Same "Client Authority: Zero"
 // pattern as before, extended with an optional `selection` (which
 // patch/rotation the client currently has picked, if any) - the client
@@ -77,19 +112,24 @@ function placementDomain(board, shape) {
 // scopedActions already returns [] to anyone who isn't the current
 // player, so only the current player's own board is ever a legitimate
 // query target here.
+//
+// Selection is scoped to offeredPatches(state) - the 3 patches
+// currently in front of the neutral token (patchCircle.js) - not the
+// whole remaining pool. Buying from anywhere else in the circle isn't
+// a real Patchwork move.
 function queryLegalActions(state, { patchId, rotation } = {}) {
-  if (state.status !== 'in-progress') {
+  if (state.phase !== 'play') {
     return [];
   }
   if (patchId == null) {
-    const affordablePatches = state.availablePatches.filter((id) => {
+    const affordablePatches = offeredPatches(circleFrom(state)).filter((id) => {
       const patch = getPatch(id);
       return patch && patch.cost <= state.playerMoney[state.currentPlayer];
     });
     return [{ type: 'selectPatch', params: { patchId: { domain: affordablePatches } } },
             { type: 'advanceTimeToken', params: {} } ];
   }
-  if (!state.availablePatches.includes(patchId)) {
+  if (!offeredPatches(circleFrom(state)).includes(patchId)) {
     return [];
   }
   const patch = getPatch(patchId);
@@ -106,10 +146,10 @@ function queryLegalActions(state, { patchId, rotation } = {}) {
 // queryLegalActions would report - never trusts the client's own
 // rotation/pivot math.
 function applyAction(state, action) {
-  if (state.status === 'lobby') {
+  if (state.phase === 'lobby') {
     return { state, error: 'lobby-not-started' };
   }
-  if (state.status !== 'in-progress') {
+  if (state.phase !== 'play') {
     return { state, error: 'game-over' };
   }
   if (!action ) {
@@ -159,10 +199,11 @@ function advanceTimeTokenGetNextState(state, action) {
   return {
     quiltBoards: { ...state.quiltBoards },
     availablePatches: state.availablePatches,
+    neutralTokenIndex: state.neutralTokenIndex,
     currentPlayer: nextPlayerFrom(nextTimeTrackPositions, state.currentPlayer),
     timeTrackPositions: nextTimeTrackPositions,
     playerMoney: nextPlayerMoney,
-    status: state.status,
+    phase: state.phase,
   };
 }
 
@@ -220,7 +261,11 @@ function placePatchGetNextState(state, action) {
   // patches.js's rotatePatch). Converted to a top-left corner here,
   // once, before any of the actual fit/bounds checking below.
   const { patchId, row, col } = action;
-  if (typeof patchId !== 'string' || !state.availablePatches.includes(patchId)) {
+  // Which of the 3 currently-offered patches this is (patchCircle.js's
+  // "offset from the neutral token") - -1 means it's not one of them,
+  // whether because it's still elsewhere in the circle or already taken.
+  const offerOffset = offeredPatches(circleFrom(state)).indexOf(patchId);
+  if (typeof patchId !== 'string' || offerOffset === -1) {
     return { state, error: 'invalid-patch' };
   }
 
@@ -265,17 +310,21 @@ function placePatchGetNextState(state, action) {
   nextTimeTrackPositions[state.currentPlayer] = Math.min(nextTimeTrackPositions[state.currentPlayer] + patch.time, TRACK_LENGTH);
   nextPlayerMoney[state.currentPlayer] += calculateGlobalBoardIncome(state, nextBoards, nextTimeTrackPositions);
 
-  const availablePatches = state.availablePatches.filter((id) => id !== patchId);
+  // Removes the bought patch from the circle and moves the neutral
+  // token to sit where it was - see patchCircle.js for why the new
+  // token position is what it is.
+  const { patchCircle: availablePatches, neutralTokenIndex } = takePatch(circleFrom(state), offerOffset);
   const nextPlayer = nextPlayerFrom(nextTimeTrackPositions, state.currentPlayer);
 
 
   return {
     quiltBoards: nextBoards,
     availablePatches,
+    neutralTokenIndex,
     currentPlayer: nextPlayer,
     timeTrackPositions: nextTimeTrackPositions,
     playerMoney: nextPlayerMoney,
-    status: availablePatches.length === 0 ? 'complete' : 'in-progress',
+    phase: availablePatches.length === 0 ? 'complete' : 'play',
   };
 }
 

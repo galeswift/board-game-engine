@@ -75,6 +75,24 @@ export default function App() {
 
   const initedRef = useRef(false);
   const playerIdRef = useRef(null);
+  // Guards against createGame/loadGame calls racing each other - e.g.
+  // the initial auto-create-on-load firing, then a "New Game" click
+  // starting a second one before the first has finished. Both are full
+  // async chains (create -> maybe join -> fetch legal actions), so
+  // nothing guarantees they settle in start order; without this, a
+  // slower *earlier* call's state could land after and clobber a
+  // faster *later* one's, leaving gameId and legalActions describing
+  // two different games. Each call captures its own token and only
+  // commits state if it's still the most recent call when it finishes.
+  const loadTokenRef = useRef(0);
+  // How many createGame/loadGame calls are currently in flight. While
+  // this is > 0, the UI must not be interactive - even a call that's
+  // about to lose the loadTokenRef race still renders a real,
+  // "ready to act" gameState/legalActions pair for its own (soon to be
+  // discarded) game in the meantime, which is enough for something
+  // driving the UI quickly (a test, a fast double-click) to act on a
+  // game that's about to disappear underneath it.
+  const [pendingLoads, setPendingLoads] = useState(0);
 
   function updatePlayerId(id) {
     playerIdRef.current = id;
@@ -89,6 +107,16 @@ export default function App() {
   }
 
   async function createGame(requestedMode) {
+    const token = ++loadTokenRef.current;
+    setPendingLoads((n) => n + 1);
+    try {
+      await createGameInner(requestedMode, token);
+    } finally {
+      setPendingLoads((n) => n - 1);
+    }
+  }
+
+  async function createGameInner(requestedMode, token) {
     const res = await fetch('/api/games', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -119,6 +147,13 @@ export default function App() {
       newInviteLink = inviteLinkFor(gid, opponentInvite.token);
     }
 
+    const newLegalActions = await fetchLegalActions(gid, newPlayerId);
+
+    // A newer createGame/loadGame call started while this one was
+    // still in flight - let that one's state win instead of
+    // clobbering it with this now-stale result (see loadTokenRef).
+    if (loadTokenRef.current !== token) return;
+
     window.history.replaceState({}, '', url);
 
     setGameId(gid);
@@ -129,10 +164,20 @@ export default function App() {
     setLobby(newLobby);
     setInviteLink(newInviteLink);
     clearSelection();
-    setLegalActions(await fetchLegalActions(gid, newPlayerId));
+    setLegalActions(newLegalActions);
   }
 
   async function loadGame(id, joinToken) {
+    const token = ++loadTokenRef.current;
+    setPendingLoads((n) => n + 1);
+    try {
+      await loadGameInner(id, joinToken, token);
+    } finally {
+      setPendingLoads((n) => n - 1);
+    }
+  }
+
+  async function loadGameInner(id, joinToken, token) {
     const res = await fetch(`/api/games/${id}`);
     if (!res.ok) {
       await createGame('local');
@@ -157,6 +202,10 @@ export default function App() {
       }
     }
 
+    const newLegalActions = await fetchLegalActions(gid, newPlayerId);
+
+    if (loadTokenRef.current !== token) return;
+
     setGameId(gid);
     setMode(newMode);
     updatePlayerId(newPlayerId);
@@ -165,7 +214,7 @@ export default function App() {
     setLobby(newLobby);
     setInviteLink('');
     clearSelection();
-    setLegalActions(await fetchLegalActions(gid, newPlayerId));
+    setLegalActions(newLegalActions);
   }
 
   async function selectPatch(patchId) {
@@ -334,7 +383,12 @@ export default function App() {
     return () => socket.close();
   }, [gameId]);
 
-  if (!gameState) {
+  // pendingLoads > 0 means a createGame/loadGame call is still in
+  // flight - even if `gameState` already holds a real, actionable game
+  // from an earlier call, it may be about to be replaced (see
+  // loadTokenRef/pendingLoads above), so the UI must not look
+  // interactive until everything has settled on one final game.
+  if (!gameState || pendingLoads > 0) {
     return (
       <main>
         <h1>Patchwork</h1>
@@ -344,6 +398,13 @@ export default function App() {
   }
 
   const canAct = legalActions.some((a) => a.type === 'selectPatch');
+  // The only patches actually pickable right now - the 3 in front of
+  // the neutral token, further filtered to what's affordable (see
+  // engine.js's queryLegalActions/patchCircle.js) - straight from the
+  // server, per "Client Authority: Zero": PatchPicker must never
+  // recompute this from gameState.availablePatches (the whole
+  // remaining circle) itself.
+  const pickableDomain = legalActions.find((a) => a.type === 'selectPatch')?.params.patchId.domain ?? [];
   const interactiveSlot = canAct ? gameState.currentPlayer : null;
   // The slot this browser controls right now: in multiplayer that's the
   // fixed identity from the invite token (mySlot, null until joined -
@@ -354,9 +415,9 @@ export default function App() {
   // instead, so that branch is only ever written once.
   const activeSlot = mode === 'multiplayer' ? mySlot : gameState.currentPlayer;
   const highlighted = new Set(highlightedCells.map(([row, col]) => `${row},${col}`));
-  const statusText = gameState.status === 'lobby'
+  const statusText = gameState.phase === 'lobby'
     ? 'Waiting for another player to join… share the link!'
-    : gameState.status === 'complete'
+    : gameState.phase === 'complete'
       ? 'All patches have been placed!'
       : !canAct
         ? "Waiting for the other player…"
@@ -396,8 +457,7 @@ export default function App() {
       />
       <PatchPicker
         patches={patches}
-        availablePatches={gameState.availablePatches}
-        playerMoney={gameState.playerMoney[activeSlot]}
+        pickableDomain={pickableDomain}
         selectedPatchId={selectedPatchId}
         onSelect={selectPatch}
         disabled={!canAct}
@@ -416,7 +476,7 @@ export default function App() {
         board to place it.</p>
 
       <InvitePanel
-        visible={gameState.status === 'lobby' && !!inviteLink}
+        visible={gameState.phase === 'lobby' && !!inviteLink}
         inviteLink={inviteLink}
         onCopy={handleCopyInvite}
         copyLabel={copyLabel}

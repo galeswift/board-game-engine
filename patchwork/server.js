@@ -240,7 +240,7 @@ const server = http.createServer(async (req, res) => {
       record.state = startGame(record.state);
     }
     await saveGame(id, { state: record.state, lobby: record.lobby });
-    if (record.state.status === 'in-progress') {
+    if (record.state.phase === 'play') {
       broadcastState(id, record);
     }
 

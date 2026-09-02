@@ -73,6 +73,19 @@ async function fetchActions(gameId, { playerId, patchId, rotation } = {}) {
   return res.json();
 }
 
+// Which patch is buyable isn't fixed anymore (the patch circle is
+// shuffled per game - engine.js/patchCircle.js), so tests that need to
+// actually buy one ask the server which of the 3 currently offered
+// patches is pickable, then where it's legal to place, rather than
+// assuming a fixed id/anchor like the old flat-pool 'patch-01' did.
+async function firstPickablePlacement(gameId, opts = {}) {
+  const { actions } = await fetchActions(gameId, opts);
+  const patchId = actions[0].params.patchId.domain[0];
+  const { actions: placeActions } = await fetchActions(gameId, { ...opts, patchId, rotation: 0 });
+  const [row, col] = placeActions[0].params.anchor.domain[0];
+  return { patchId, row, col };
+}
+
 test('legal actions and preview endpoints', async (t) => {
   const child = spawn(process.execPath, [path.join(__dirname, 'server.js')], {
     env: { ...process.env, PORT: String(PORT) },
@@ -82,48 +95,56 @@ test('legal actions and preview endpoints', async (t) => {
   try {
     await waitForServer();
 
-    await t.test('GET /api/games/:id/actions lists every affordable patch as pickable on a fresh game, plus advanceTimeToken', async () => {
+    await t.test('GET /api/games/:id/actions lists the currently-offered, affordable patches, plus advanceTimeToken', async () => {
       const { gameId } = await createGame();
       const res = await fetch(`${BASE}/api/games/${gameId}/actions`);
       assert.equal(res.status, 200);
       const body = await res.json();
-      assert.deepEqual(body.actions, [
-        { type: 'selectPatch', params: { patchId: { domain: AFFORDABLE_PATCH_IDS } } },
-        { type: 'advanceTimeToken', params: {} },
-      ]);
+      assert.equal(body.actions[0].type, 'selectPatch');
+      const domain = body.actions[0].params.patchId.domain;
+      // Never more than the 3 the circle actually offers right now
+      // (engine.js/patchCircle.js) - could be fewer if some aren't
+      // affordable with the starting 5 buttons.
+      assert.ok(domain.length <= 3);
+      assert.ok(domain.every((id) => AFFORDABLE_PATCH_IDS.includes(id)));
+      assert.deepEqual(body.actions[1], { type: 'advanceTimeToken', params: {} });
     });
 
-    await t.test('the pickable-patch domain shrinks after a placement', async () => {
+    await t.test('the pickable-patch domain excludes a patch once it has been bought', async () => {
       const { gameId } = await createGame();
-      await placePatch(gameId, { patchId: 'patch-01', row: 0, col: 0 });
+      const { patchId, row, col } = await firstPickablePlacement(gameId);
+      await placePatch(gameId, { patchId, row, col });
       // Turn passes to player 1 (still behind on the time track after
-      // player 0's move), so this now reports player 1's domain - their 5
-      // buttons are untouched, so the only change from a fresh game is
-      // patch-01 no longer available.
+      // player 0's move) - whoever's turn it is now, the bought patch
+      // is gone from the circle entirely, so never offered to anyone.
       const { actions } = await fetchActions(gameId);
-      assert.equal(actions[0].params.patchId.domain.includes('patch-01'), false);
-      assert.equal(actions[0].params.patchId.domain.length, AFFORDABLE_PATCH_IDS.length - 1);
+      assert.equal(actions[0].params.patchId.domain.includes(patchId), false);
     });
 
     await t.test('GET /actions with a patchId reports the placement-anchor domain for that patch', async () => {
       const { gameId } = await createGame();
-      const { actions } = await fetchActions(gameId, { patchId: 'patch-01' });
+      const { actions: initial } = await fetchActions(gameId);
+      const patchId = initial[0].params.patchId.domain[0];
+      const { actions } = await fetchActions(gameId, { patchId });
       assert.equal(actions[0].type, 'placePatch');
-      assert.equal(actions[0].params.patchId, 'patch-01');
+      assert.equal(actions[0].params.patchId, patchId);
       assert.equal(actions[0].params.rotation, 0, 'defaults to rotation 0');
       assert.ok(actions[0].params.anchor.domain.length > 0);
     });
 
     await t.test('GET /actions honors an explicit rotation parameter', async () => {
       const { gameId } = await createGame();
-      const { actions } = await fetchActions(gameId, { patchId: 'patch-01', rotation: 1 });
+      const { actions: initial } = await fetchActions(gameId);
+      const patchId = initial[0].params.patchId.domain[0];
+      const { actions } = await fetchActions(gameId, { patchId, rotation: 1 });
       assert.equal(actions[0].params.rotation, 1);
     });
 
     await t.test('GET /actions with an already-placed patchId reports no placements', async () => {
       const { gameId } = await createGame();
-      await placePatch(gameId, { patchId: 'patch-01', row: 0, col: 0 });
-      const { actions } = await fetchActions(gameId, { patchId: 'patch-01' });
+      const { patchId, row, col } = await firstPickablePlacement(gameId);
+      await placePatch(gameId, { patchId, row, col });
+      const { actions } = await fetchActions(gameId, { patchId });
       assert.deepEqual(actions, []);
     });
 
@@ -135,27 +156,32 @@ test('legal actions and preview endpoints', async (t) => {
 
     await t.test('POST preview computes the result without persisting it', async () => {
       const { gameId } = await createGame();
+      const { patchId, row, col } = await firstPickablePlacement(gameId);
       const previewRes = await fetch(`${BASE}/api/games/${gameId}/actions/preview`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ type: 'placePatch', patchId: 'patch-01', rotation: 0, row: 0, col: 0 }),
+        body: JSON.stringify({ type: 'placePatch', patchId, rotation: 0, row, col }),
       });
       assert.equal(previewRes.status, 200);
       const previewBody = await previewRes.json();
-      assert.equal(previewBody.preview.quiltBoards[0][0], 'patch-01');
+      assert.equal(previewBody.preview.quiltBoards[0].includes(patchId), true);
       assert.equal(previewBody.error, null);
 
       const stateRes = await fetch(`${BASE}/api/games/${gameId}`);
       const { state } = await stateRes.json();
-      assert.equal(state.quiltBoards[0][0], null, 'preview must not persist to the stored game');
+      assert.equal(state.quiltBoards[0].includes(patchId), false, 'preview must not persist to the stored game');
     });
 
     await t.test('POST preview surfaces the same errors a real action would', async () => {
       const { gameId } = await createGame();
+      const { actions } = await fetchActions(gameId);
+      const patchId = actions[0].params.patchId.domain[0];
       const res = await fetch(`${BASE}/api/games/${gameId}/actions/preview`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ type: 'placePatch', patchId: 'patch-01', rotation: 0, row: 8, col: 0 }),
+        // row: 8 is off the board regardless of which patch this is -
+        // forces invalid-placement, not invalid-patch.
+        body: JSON.stringify({ type: 'placePatch', patchId, rotation: 0, row: 8, col: 0 }),
       });
       assert.equal(res.status, 400);
       const body = await res.json();
@@ -175,7 +201,7 @@ test('legal actions and preview endpoints', async (t) => {
     await t.test('creating a multiplayer game starts in the lobby with two distinct invite tokens', async () => {
       const { mode, state, invites, lobby } = await createMultiplayerGame();
       assert.equal(mode, 'multiplayer');
-      assert.equal(state.status, 'lobby');
+      assert.equal(state.phase, 'lobby');
       assert.equal(invites.length, 2);
       assert.notEqual(tokenFor(invites, 0), tokenFor(invites, 1));
       assert.deepEqual(lobby, { 0: { claimed: false }, 1: { claimed: false } });
@@ -200,13 +226,13 @@ test('legal actions and preview endpoints', async (t) => {
       const first = await join(gameId, tokenFor(invites, 0));
       assert.equal(first.slot, 0);
       assert.ok(first.playerId);
-      assert.equal(first.state.status, 'lobby', 'still waiting on the second slot');
+      assert.equal(first.state.phase, 'lobby', 'still waiting on the second slot');
 
       const second = await join(gameId, tokenFor(invites, 1));
       assert.equal(second.slot, 1);
       assert.ok(second.playerId);
       assert.notEqual(second.playerId, first.playerId);
-      assert.equal(second.state.status, 'in-progress', 'auto-starts once both slots are filled');
+      assert.equal(second.state.phase, 'play', 'auto-starts once both slots are filled');
     });
 
     await t.test('re-joining with an already-claimed slot\'s token reconnects (same playerId)', async () => {
@@ -284,14 +310,17 @@ test('legal actions and preview endpoints', async (t) => {
       const p1 = await join(gameId, tokenFor(invites, 0)); // moves first
       const p2 = await join(gameId, tokenFor(invites, 1));
 
+      // 'not-your-turn' is checked before the action's own patchId is
+      // even looked at, so a placeholder id is fine here.
       const outOfTurn = await placePatch(gameId, { patchId: 'patch-01', row: 0, col: 0, playerId: p2.playerId });
       assert.equal(outOfTurn.status, 400);
       assert.equal((await outOfTurn.json()).error, 'not-your-turn');
 
-      const onTurn = await placePatch(gameId, { patchId: 'patch-01', row: 0, col: 0, playerId: p1.playerId });
+      const { patchId, row, col } = await firstPickablePlacement(gameId, { playerId: p1.playerId });
+      const onTurn = await placePatch(gameId, { patchId, row, col, playerId: p1.playerId });
       assert.equal(onTurn.status, 200);
       const onTurnBody = await onTurn.json();
-      assert.equal(onTurnBody.state.quiltBoards[0][0], 'patch-01');
+      assert.equal(onTurnBody.state.quiltBoards[0].includes(patchId), true);
       assert.equal(onTurnBody.state.currentPlayer, 1, 'turn passes to the other player');
     });
 
