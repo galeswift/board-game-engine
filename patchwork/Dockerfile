@@ -11,7 +11,7 @@ WORKDIR /app
 COPY package.json package-lock.json* ./
 RUN npm install --omit=dev
 
-COPY server.js engine.js db.js patches.js timeTrack.js ./
+COPY server.js engine.js db.js patches.js timeTrack.js patchCircle.js ./
 COPY --from=web-build /app/web/dist ./web/dist
 
 EXPOSE 3000
