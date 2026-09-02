@@ -405,7 +405,6 @@ export default function App() {
   // recompute this from gameState.availablePatches (the whole
   // remaining circle) itself.
   const pickableDomain = legalActions.find((a) => a.type === 'selectPatch')?.params.patchId.domain ?? [];
-  const affordableDomain = legalActions.find((a) => a.type === 'selectPatch')?.params.patchId.domain ?? [];
   const interactiveSlot = canAct ? gameState.currentPlayer : null;
   // The slot this browser controls right now: in multiplayer that's the
   // fixed identity from the invite token (mySlot, null until joined -
@@ -432,7 +431,6 @@ export default function App() {
     patchCircle.push(patchesById.get(patch));
   });
 
-  console.log("Patch circle is "+JSON.stringify(patchCircle)+", neutral token at "+gameState.neutralTokenIndex);
   return (
     <main className="patchwork-app">
       <h1>Patchwork</h1>
@@ -470,7 +468,6 @@ export default function App() {
             patches={patchCircle}
             neutralTokenIndex={gameState.neutralTokenIndex}
             pickableDomain={pickableDomain}
-            affordableDomain={affordableDomain}
             selectedPatchId={selectedPatchId}
             onSelect={selectPatch}
             disabled={!canAct} />          
