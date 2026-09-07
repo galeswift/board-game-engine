@@ -30,7 +30,7 @@ export default function PatchPicker({ patches, neutralTokenIndex, pickableDomain
             title={patch.id}
             data-patch-id={patch.id}
           >
-            <PatchShape shape={rotatePatch(patch, 0)} cost={patch.cost} time={patch.time} size={8} />
+            <PatchShape shape={rotatePatch(patch, 0)} cost={patch.cost} time={patch.time} income={patch.income} size={8} />
           </button>
         );
       })}
