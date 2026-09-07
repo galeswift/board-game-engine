@@ -10,8 +10,10 @@
 # section):
 #   1. Root Directory: "patchwork" -> "." (repo root) - this is what
 #      becomes the build context.
-#   2. A RAILWAY_DOCKERFILE_PATH=patchwork/Dockerfile service variable -
+#   2. Settings -> Build -> Dockerfile Path: "patchwork/Dockerfile" -
 #      tells Railway which file, inside that context, is the Dockerfile.
+#      (Not an environment variable - it's a dedicated field in the
+#      Settings UI.)
 # Both are one-time manual dashboard changes, not a new shared build
 # step (still a single `docker build` invocation).
 FROM node:20-slim AS web-build

@@ -108,9 +108,10 @@ Directory, not subfolders):
 
 1. **Settings → Root Directory**: `.` (the repo root) - this is what
    becomes the Docker build context.
-2. **Variables**: add `RAILWAY_DOCKERFILE_PATH` = `patchwork/Dockerfile`
-   - tells Railway which file, inside that root-directory context, is
-   the actual Dockerfile.
+2. **Settings → Build → Dockerfile Path**: `patchwork/Dockerfile` -
+   tells Railway which file, inside that root-directory context, is
+   the actual Dockerfile. This is a dedicated field in the Settings UI,
+   not an environment variable.
 
 Verify locally before changing these on a live service:
 `docker build -f patchwork/Dockerfile -t patchwork-test .` from the

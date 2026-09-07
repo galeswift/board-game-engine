@@ -12,7 +12,9 @@ Prototypes for a board game rules engine, one folder per game:
   persistence) and a Vite/React frontend, but still running
   tic-tac-toe's *rules* underneath — real Patchwork rules aren't built
   yet. See [`patchwork/README.md`](patchwork/README.md) for local setup.
-- **`forbidden-island/`** — not yet implemented.
+- **`forbidden-island/`** — bootstrap only: phases (lobby/setup/mainLoop/
+  victory/defeat) via `packages/rules-engine-core`, no real rules yet.
+  See [`forbidden-island/README.md`](forbidden-island/README.md).
 
 Each folder is self-contained and deployable independently — no shared
 package, no shared build step across folders. `tic-tac-toe/` and
