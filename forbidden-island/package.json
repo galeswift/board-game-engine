@@ -2,10 +2,11 @@
   "name": "forbidden-island",
   "version": "0.1.0",
   "private": true,
-  "description": "Forbidden Island bootstrap: phases only (lobby/setup/mainLoop/victory/defeat) via packages/rules-engine-core, no real rules yet.",
+  "description": "Forbidden Island bootstrap: phases plus a fabricated mainLoop playthrough via packages/rules-engine-core, and a Vite/React frontend, but no real island/roles/decks yet.",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
+    "build": "npm --prefix web run build",
     "test": "node --test"
   },
   "engines": {

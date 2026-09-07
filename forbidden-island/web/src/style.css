@@ -50,3 +50,46 @@ button {
 button:active {
   background: #1d4ed8;
 }
+
+.stats {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  margin: 0 0 20px;
+  padding: 10px 12px;
+  border: 1px solid #334155;
+  border-radius: 10px;
+  background: #1e293b;
+}
+
+.stats div {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.stats dt {
+  font-size: 0.7rem;
+  color: #64748b;
+  text-transform: uppercase;
+}
+
+.stats dd {
+  margin: 0;
+  font-weight: 700;
+}
+
+.controls {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-bottom: 20px;
+}
+
+.new-game {
+  background: #334155;
+}
+
+.new-game:active {
+  background: #1e293b;
+}

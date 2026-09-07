@@ -5,14 +5,27 @@ stress-test the rules engine's handling of asymmetric player roles,
 always-legal interrupt actions, and cooperative win/loss conditions (see
 the root [docs/architecture.md](../docs/architecture.md), Section 12).
 
-Right now this folder only bootstraps the phase structure on top of
+Right now this folder bootstraps the phase structure on top of
 `packages/rules-engine-core` — `lobby` → `setup` → `mainLoop` →
-`victory` → `defeat` — with a single `advancePhase` action that cycles
-through them manually via a button in the UI. There's no island, no
-roles, no flood deck, no real turn structure, and no lobby/multiplayer
-join flow yet; state lives in memory and resets on every restart.
+`victory`/`defeat` — plus a **fabricated playthrough** of `mainLoop`'s
+turn structure: 3 placeholder actions, then draw 2 (fake) treasure
+cards, then draw (fake) flood cards, then the next player's turn. Water
+level, treasures found, and whether the island collapses on a given
+turn are just numbers pushed around by the seeded RNG — there's no
+island, no tiles, no roles, no real decks. It exists to exercise the
+turn/RNG/win-loss-transition shape of the real game before any of that
+real state is built. No lobby/multiplayer join flow yet either; state
+lives in memory and resets on every restart (or via the "New Game"
+button).
+
+The frontend is a Vite/React app under `web/` (same split as
+`patchwork/web/` - kept as its own npm project so React/Vite deps never
+enter the server's production Dockerfile stage); `server.js` serves its
+built output from `web/dist`.
 
 ## Running locally
+
+Backend:
 
 ```
 cd forbidden-island
@@ -20,8 +33,24 @@ npm install
 npm start
 ```
 
-Then open `http://localhost:3000` and click "Advance Phase" to step
-through lobby → setup → mainLoop → victory → defeat → back to lobby.
+Frontend, in a second terminal (proxies `/api` to `http://localhost:3000`,
+so the backend above must already be running):
+
+```
+cd forbidden-island/web
+npm install
+npm run dev
+```
+
+Open the URL Vite prints (typically `http://localhost:5173`), click
+"Start Game," and play through a fabricated game: take up to 3 actions
+per turn, draw treasure cards (may raise the water level or find a
+treasure), draw flood cards (may end the game), repeat until "victory"
+(4 treasures found) or "defeat" (the island collapses).
+
+To run it as it deploys - one server, no separate dev proxy - build the
+frontend first: `npm run build` (from `forbidden-island/`) then
+`npm start`, and open `http://localhost:3000` directly.
 
 ## Tests
 

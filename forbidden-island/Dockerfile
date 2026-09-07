@@ -8,6 +8,13 @@
 # "forbidden-island/Dockerfile" (a dedicated Settings UI field, not an
 # environment variable) telling it which Dockerfile inside that context
 # to use.
+FROM node:20-slim AS web-build
+WORKDIR /app/web
+COPY forbidden-island/web/package.json forbidden-island/web/package-lock.json* ./
+RUN npm install
+COPY forbidden-island/web/ ./
+RUN npm run build
+
 FROM node:20-slim
 WORKDIR /app
 
@@ -15,8 +22,8 @@ COPY forbidden-island/package.json forbidden-island/package-lock.json* ./
 RUN npm install --omit=dev
 
 COPY forbidden-island/server.js forbidden-island/gameDefinition.js ./
-COPY forbidden-island/public ./public
 COPY packages/rules-engine-core ../packages/rules-engine-core
+COPY --from=web-build /app/web/dist ./web/dist
 
 EXPOSE 3000
 CMD ["node", "server.js"]
