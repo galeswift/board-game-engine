@@ -1,12 +1,9 @@
 services:
-  forbidden-island:
-    build:
-      # Relative to this file's directory (forbidden-island/), so ".."
-      # is the repo root - required so the Dockerfile can COPY files
-      # from packages/rules-engine-core, which lives outside this
-      # folder. Equivalent to running, from the repo root:
-      #   docker build -f forbidden-island/Dockerfile -t forbidden-island .
-      context: ..
-      dockerfile: forbidden-island/Dockerfile
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: forbiddenisland
     ports:
-      - "3000:3000"
+      - "5434:5432"

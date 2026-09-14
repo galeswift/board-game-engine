@@ -52,21 +52,31 @@ To run it as it deploys - one server, no separate dev proxy - build the
 frontend first: `npm run build` (from `forbidden-island/`) then
 `npm start`, and open `http://localhost:3000` directly.
 
-### Running it in Docker instead
+### Local Postgres (for upcoming persistence work)
 
 ```
 cd forbidden-island
-docker compose up -d --build
+docker compose up -d
 ```
 
-This builds the same production image described below (frontend build +
-server, no dev proxy) and runs it at `http://localhost:3000`. Unlike
-`tic-tac-toe/`'s and `patchwork/`'s `docker-compose.yml` - which each
-only stand up a local Postgres for their app to connect to, not the app
-itself - this one runs the forbidden-island app container directly,
-since there's no database dependency (yet) to separate out.
+Same pattern as `tic-tac-toe/`'s and `patchwork/`'s `docker-compose.yml`:
+this stands up a local Postgres only, not the app itself - `npm start`
+still runs the Node process directly on `http://localhost:3000`, same as
+above. Nothing in forbidden-island reads or writes this database yet
+(no `db.js`, no schema) - it's provisioned ahead of that work so the
+port collides with nothing else (tic-tac-toe uses `5432`, patchwork
+`5433`, this uses `5434`) and the app can pick it up ready-configured
+once persistence lands. `docker compose down` stops and removes it.
 
-`docker compose down` stops and removes it.
+To build/run the production Docker image itself (frontend build +
+server, no dev proxy, no Postgres) instead of using `npm start`:
+
+```
+docker build -f forbidden-island/Dockerfile -t forbidden-island .
+docker run -p 3000:3000 forbidden-island
+```
+(run from the repo root, not from inside `forbidden-island/` - see the
+Railway section below for why).
 
 ## Tests
 
