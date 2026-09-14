@@ -1,0 +1,9 @@
+{
+  "name": "board-game-engine",
+  "private": true,
+  "version": "0.0.0",
+  "description": "Root-level test aggregator only - runs every folder's own already-independent test suite from one command. No shared build step or dependencies added here; each game folder stays independently deployable (see CLAUDE.md).",
+  "scripts": {
+    "test": "node run-tests.js"
+  }
+}
