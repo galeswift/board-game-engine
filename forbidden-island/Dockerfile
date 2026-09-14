@@ -21,7 +21,7 @@ WORKDIR /app
 COPY forbidden-island/package.json forbidden-island/package-lock.json* ./
 RUN npm install --omit=dev
 
-COPY forbidden-island/server.js forbidden-island/gameDefinition.js ./
+COPY forbidden-island/server.js forbidden-island/gameDefinition.js forbidden-island/islandTiles.js ./
 COPY packages/rules-engine-core ../packages/rules-engine-core
 COPY --from=web-build /app/web/dist ./web/dist
 
