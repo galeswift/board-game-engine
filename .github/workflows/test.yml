@@ -76,3 +76,12 @@ jobs:
 
       - name: Run every project's test suite
         run: npm test
+
+      # Builds and runs the REAL production Dockerfile, then hits its
+      # API - the class of check that would have caught a file missing
+      # from the Dockerfile's COPY list (see docker-smoke-test.js's own
+      # comment for the incident this guards against). Every check above
+      # runs code straight off disk, so none of them would have noticed.
+      - name: Forbidden Island Docker smoke test
+        working-directory: forbidden-island
+        run: npm run test:docker

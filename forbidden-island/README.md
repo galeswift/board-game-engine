@@ -84,6 +84,25 @@ Railway section below for why).
 npm test
 ```
 
+### Docker smoke test
+
+`npm test` (unit/server/browser) all run code straight off disk - none
+of them would notice a file missing from the Dockerfile's own `COPY`
+list, which is exactly how a real Railway deploy crashed once
+(`Error: Cannot find module './islandTiles'` - `gameDefinition.js`
+requires it, but the Dockerfile never copied it in). To actually catch
+that class of bug, `test:docker` builds the real production image and
+runs it as a real container, then hits its API:
+
+```
+npm run test:docker
+```
+
+Requires Docker. Not run as part of `npm test` (it's slow and needs
+Docker installed), but it does run in CI (`.github/workflows/test.yml`)
+and is worth running by hand before any change that touches the
+Dockerfile's `COPY` list or adds a new required file to the server side.
+
 ## Railway setup: Root Directory / Dockerfile Path
 
 `Dockerfile`'s build context is the **repo root**, not `forbidden-island/`
