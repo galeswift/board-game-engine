@@ -1,0 +1,78 @@
+name: Tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    # tic-tac-toe and patchwork each need their own local Postgres (see
+    # their own README.md's "Railway setup: attaching Postgres" and
+    # db.js's connectionString default) - one service container per
+    # project, on the same host ports their own docker-compose.yml uses
+    # locally, so no DATABASE_URL override is needed here.
+    services:
+      tic-tac-toe-postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: tictactoe
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+      patchwork-postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: patchwork
+        ports:
+          - 5433:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      # Each *.test.js's browser.test.js needs web/dist already built
+      # (server.js serves it as static files) and its own project's
+      # Playwright browser binary installed - packages/rules-engine-core
+      # has no package.json of its own (see its README) and needs
+      # neither step.
+      - name: Install and build tic-tac-toe
+        working-directory: tic-tac-toe
+        run: |
+          npm install
+          npx playwright install --with-deps chromium
+
+      - name: Install and build patchwork
+        working-directory: patchwork
+        run: |
+          npm install
+          npx playwright install --with-deps chromium
+          npm run build
+
+      - name: Install and build forbidden-island
+        working-directory: forbidden-island
+        run: |
+          npm install
+          npx playwright install --with-deps chromium
+          npm run build
+
+      - name: Run every project's test suite
+        run: npm test
