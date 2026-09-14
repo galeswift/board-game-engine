@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import Board from './components/Board.jsx';
 
 const PHASE_LABELS = {
   lobby: 'Lobby',
@@ -58,12 +59,20 @@ export default function App() {
 
   const phase = gameState.phase.current;
   const isPlaying = phase === 'mainLoop';
+  const islandTiles = gameState.shared.islandTiles || {};
+  const hasIsland = Object.keys(islandTiles).length > 0;
 
   return (
     <main>
       <h1>Forbidden Island</h1>
-      <p className="hint">Bootstrap: fabricated playthrough, no real island/roles/decks yet.</p>
+      <p className="hint">
+        Bootstrap: the board below is dealt for real during setup, but the
+        turn/water-level/treasure playthrough is still fabricated - no
+        roles or real decks yet.
+      </p>
       <p className="phase">{PHASE_LABELS[phase] || phase}</p>
+
+      {hasIsland && <Board tiles={islandTiles} />}
 
       {isPlaying && (
         <dl className="stats">

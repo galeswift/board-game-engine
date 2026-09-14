@@ -14,7 +14,7 @@ body {
 
 main {
   width: 100%;
-  max-width: 360px;
+  max-width: 640px;
   text-align: center;
 }
 
@@ -92,4 +92,62 @@ button:active {
 
 .new-game:active {
   background: #1e293b;
+}
+
+.board {
+  display: grid;
+  gap: 4px;
+  margin: 0 auto 20px;
+  width: fit-content;
+}
+
+.tile,
+.tile-empty {
+  width: 96px;
+  height: 76px;
+}
+
+.tile {
+  border: 1px solid #334155;
+  border-radius: 6px;
+  background: #1e293b;
+  padding: 4px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
+
+.tile pre {
+  margin: 0;
+  font-size: 0.5rem;
+  line-height: 1.05;
+  color: #94a3b8;
+}
+
+.tile-name {
+  font-size: 0.55rem;
+  font-weight: 700;
+  margin-top: 2px;
+  line-height: 1.1;
+}
+
+.tile-treasure {
+  font-size: 0.5rem;
+  color: #fbbf24;
+}
+
+.tile-flood {
+  font-size: 0.5rem;
+  color: #f87171;
+}
+
+.tile.flood-flooded {
+  border-color: #d97706;
+}
+
+.tile.flood-sunk {
+  border-color: #dc2626;
+  opacity: 0.5;
 }

@@ -4,6 +4,7 @@ const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const { createGame, execute, replay, extractActionLog } = require('../packages/rules-engine-core/src');
 const gameDefinition = require('./gameDefinition');
+const { TILE_NAMES } = require('./islandTiles');
 
 function act(record, type) {
   const result = execute(gameDefinition, record, { type });
@@ -21,6 +22,15 @@ test('startGame moves lobby straight through the instantaneous setup phase into 
   record = act(record, 'startGame');
   assert.equal(record.state.phase.current, 'mainLoop');
   assert.equal(record.state.shared.turnStep, 'actions');
+});
+
+test('startGame deals all 24 tiles, each exactly once, onto distinct board positions', () => {
+  let record = createGame(gameDefinition, { players: [0, 1] });
+  record = act(record, 'startGame');
+  const tiles = Object.values(record.state.shared.islandTiles);
+  assert.equal(tiles.length, 24);
+  assert.deepEqual(tiles.map((t) => t.name).sort(), TILE_NAMES.slice().sort());
+  assert.equal(new Set(tiles.map((t) => `${t.row},${t.col}`)).size, 24);
 });
 
 test('a turn is 3 actions, then treasure cards, then flood cards, then the next player', () => {

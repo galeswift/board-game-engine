@@ -2,15 +2,18 @@
 
 // Still a bootstrap, one step up from pure phase-cycling: this fabricates
 // a full lobby -> setup -> mainLoop -> victory/defeat playthrough with
-// placeholder turn actions, but there is still no island - no tiles, no
-// roles, no real treasure/flood decks. "Water level," "treasures found,"
-// and whether the island collapses on a given turn are all just numbers
-// pushed around by the seeded RNG, not derived from any board state.
-// This exists to exercise the turn-structure/RNG/win-loss-transition
-// shape of the real game (docs/architecture.md Section 12) before any of
-// that real state exists.
+// placeholder turn actions, and now deals a real (shuffled, positioned)
+// island layout during setup - see islandTiles.js. But there are still
+// no roles and no real treasure/flood decks: "water level," "treasures
+// found," and whether the island collapses on a given turn are all just
+// numbers pushed around by the seeded RNG, not derived from the tiles
+// themselves - nothing here reads or writes state.shared.islandTiles
+// once it's dealt. This exists to exercise the turn-structure/RNG/
+// win-loss-transition shape of the real game (docs/architecture.md
+// Section 12) before any of that real state exists.
 
 const { defineGame } = require('../packages/rules-engine-core/src');
+const { dealIsland } = require('./islandTiles');
 
 const ACTIONS_PER_TURN = 3;
 const TREASURE_CARDS_PER_DRAW = 2;
@@ -42,6 +45,10 @@ module.exports = defineGame({
   createInitialState() {
     return {
       shared: {
+        // Dealt once setup completes (see CompleteFabricatedSetup below) -
+        // empty here because createInitialState has no context.rng
+        // available to shuffle with (see context.js).
+        islandTiles: {},
         waterLevel: INITIAL_WATER_LEVEL,
         treasuresFound: 0,
         // Where in the current player's turn we are - gates which of the
@@ -76,7 +83,10 @@ module.exports = defineGame({
   },
 
   commands: {
-    CompleteFabricatedSetup: (state) => ({ state, events: [{ type: 'SetupComplete', payload: {} }] }),
+    CompleteFabricatedSetup: (state, _payload, context) => ({
+      state: { ...state, shared: { ...state.shared, islandTiles: dealIsland(context.rng) } },
+      events: [{ type: 'SetupComplete', payload: {} }],
+    }),
 
     SpendAction: (state) => {
       const actionsRemaining = state.shared.actionsRemaining - 1;
