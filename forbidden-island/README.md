@@ -52,6 +52,22 @@ To run it as it deploys - one server, no separate dev proxy - build the
 frontend first: `npm run build` (from `forbidden-island/`) then
 `npm start`, and open `http://localhost:3000` directly.
 
+### Running it in Docker instead
+
+```
+cd forbidden-island
+docker compose up -d --build
+```
+
+This builds the same production image described below (frontend build +
+server, no dev proxy) and runs it at `http://localhost:3000`. Unlike
+`tic-tac-toe/`'s and `patchwork/`'s `docker-compose.yml` - which each
+only stand up a local Postgres for their app to connect to, not the app
+itself - this one runs the forbidden-island app container directly,
+since there's no database dependency (yet) to separate out.
+
+`docker compose down` stops and removes it.
+
 ## Tests
 
 ```
